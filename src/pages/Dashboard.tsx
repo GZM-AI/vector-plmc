@@ -68,7 +68,7 @@ const Dashboard: React.FC = () => {
           Dashboard
         </h1>
         <p className="text-sm text-zinc-400 font-normal">
-          TAR™ digital thread for unified system development.
+          TAR™ digital thread for unified system development
         </p>
       </div>
 

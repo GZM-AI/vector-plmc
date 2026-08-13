@@ -21,7 +21,7 @@ const App: React.FC = () => {
         <Sidebar user={{ username: 'Zedekiah' }} />
         <div className="flex-1 overflow-auto">
           <Routes>
-            <Route path="/" element={<Navigate to="/system-architecture" replace />} />
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
             <Route path="/system-architecture" element={<SystemArchitecture />} />
             <Route path="/dashboard" element={<Dashboard />} />
             <Route path="/system-registry" element={<SystemRegistry />} />
