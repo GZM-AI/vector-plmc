@@ -14,19 +14,21 @@ type Hotspot = {
 };
 
 const DEFAULT_HOTSPOTS: Hotspot[] = [
-  { id: 'sub-optical', label: 'Optical Sensor Integration', left: 38, top: 14, width: 14, height: 22, color: '#22c55e' },
-  { id: 'sub-machine-vision', label: 'Machine Vision', left: 42, top: 10, width: 12, height: 16, color: '#0ea5e9' },
-  { id: 'sub-sensor-fusion', label: 'Sensor Fusion', left: 32, top: 30, width: 12, height: 26, color: '#f97316' },
-  { id: 'sub-ballistics', label: 'Ballistic Computation', left: 34, top: 38, width: 12, height: 22, color: '#d946ef' },
-  { id: 'sub-barrel-actuation', label: 'Barrel Actuation', left: 52, top: 28, width: 34, height: 28, color: '#ef4444' },
-  { id: 'sub-chassis', label: 'Chassis', left: 10, top: 42, width: 16, height: 28, color: '#a3e635' },
-  { id: 'sub-receiver', label: 'Receiver Configuration', left: 30, top: 32, width: 14, height: 26, color: '#06b6d4' },
-  { id: 'sub-trigger', label: 'Trigger', left: 26, top: 48, width: 10, height: 16, color: '#fbbf24' },
-  { id: 'sub-power', label: 'Power', left: 28, top: 52, width: 12, height: 18, color: '#f8fafc' },
-  { id: 'sub-closed-loop', label: 'Closed Loop', left: 28, top: 34, width: 12, height: 24, color: '#6366f1' },
+  { id: 'sub-optical', label: 'Optical Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
+  { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
+  { id: 'sub-machine-vision', label: 'Machine Vision', left: 42, top: 20, width: 12, height: 14, color: '#0ea5e9' },
+  { id: 'sub-pixel-to-position', label: 'Pixel to Position', left: 48, top: 16, width: 12, height: 14, color: '#14b8a6' },
+  { id: 'sub-sensor-fusion', label: 'Sensor Fusion', left: 32, top: 30, width: 12, height: 22, color: '#f97316' },
+  { id: 'sub-ballistics', label: 'Ballistic Computation', left: 34, top: 38, width: 12, height: 20, color: '#d946ef' },
+  { id: 'sub-barrel-actuation', label: 'Barrel Actuation', left: 52, top: 28, width: 34, height: 26, color: '#ef4444' },
+  { id: 'sub-chassis', label: 'Chassis', left: 10, top: 42, width: 16, height: 26, color: '#a3e635' },
+  { id: 'sub-receiver', label: 'Receiver Configuration', left: 30, top: 32, width: 14, height: 24, color: '#06b6d4' },
+  { id: 'sub-trigger', label: 'Trigger', left: 26, top: 48, width: 10, height: 14, color: '#fbbf24' },
+  { id: 'sub-power', label: 'Power', left: 28, top: 54, width: 12, height: 16, color: '#f8fafc' },
+  { id: 'sub-closed-loop', label: 'Closed Loop', left: 28, top: 34, width: 12, height: 22, color: '#6366f1' },
 ];
 
-const STORAGE_KEY = 'vector-tar-hotspots-v2';
+const STORAGE_KEY = 'vector-tar-hotspots-v3';
 
 function loadHotspots(): Hotspot[] {
   try {
@@ -196,8 +198,8 @@ const SystemArchitecture: React.FC = () => {
             {editMode
               ? 'EDIT ON — drag zones · white corner resizes'
               : showZones
-                ? 'TAR™ · All zones visible · Click a zone or list item'
-                : 'TAR™ · Zones hidden · Select a subsystem to highlight it on the map'}
+                ? `TAR™ · ${hotspots.length} zones · Click a zone or list item`
+                : 'TAR™ · Zones hidden · Select a subsystem to highlight it'}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -240,13 +242,7 @@ const SystemArchitecture: React.FC = () => {
 
       {editMode && (
         <div className="mb-4 px-4 py-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm">
-          Edit mode is ON. Press and hold on a colored box, then drag. Use the white square at the bottom-right to resize.
-        </div>
-      )}
-
-      {!showZones && !activeId && (
-        <div className="mb-4 px-4 py-3 rounded-2xl bg-zinc-900 border border-zinc-700 text-zinc-400 text-sm">
-          Zones are hidden. Pick a subsystem from the chips below or the list on the right — only that zone will appear on the rifle.
+          Edit mode is ON. Drag colored boxes; use the white corner to resize.
         </div>
       )}
 
@@ -332,7 +328,6 @@ const SystemArchitecture: React.FC = () => {
                   type="button"
                   onClick={() => setActiveId(null)}
                   className="p-2 rounded-xl text-zinc-500 hover:text-white"
-                  title="Clear selection"
                 >
                   <X size={16} />
                 </button>
@@ -374,9 +369,7 @@ const SystemArchitecture: React.FC = () => {
             <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-10 text-center sticky top-6">
               <Crosshair className="mx-auto text-zinc-600 mb-3" size={36} />
               <p className="text-zinc-400 text-sm mb-6">
-                {showZones
-                  ? 'Select a region or subsystem name.'
-                  : 'Zones hidden — select a subsystem to show only that zone on the map.'}
+                Select a region or subsystem name.
               </p>
               <div className="grid grid-cols-1 gap-2 text-left">
                 {subsystems.map((s: any) => {
