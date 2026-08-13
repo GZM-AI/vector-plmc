@@ -1,105 +1,114 @@
+/**
+ * Vector Dashboard — hub for all PLM modules
+ */
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { Box, CalendarClock, Factory, GitBranch, ArrowRight } from 'lucide-react';
+import {
+  Box,
+  CalendarClock,
+  Factory,
+  GitBranch,
+  ArrowRight,
+  Crosshair,
+  Search,
+  LayoutDashboard,
+} from 'lucide-react';
 
-const cards = [
+const modules = [
+  {
+    title: 'System Architecture',
+    description:
+      'TAR™ silhouette with subsystem hotspots. Inspect structure, open constituents, and manage shared zone layout.',
+    icon: Crosshair,
+    path: '/system-architecture',
+  },
   {
     title: 'System Registry',
     description:
-      'Full hierarchical view of the TAR™ — systems, subsystems, components, interfaces, and vertical integrators.',
+      'Full product structure — system, subsystems, components, software, interfaces, and per-subsystem Vertical Integrators.',
     icon: Box,
     path: '/system-registry',
-    ready: true,
   },
   {
     title: 'Planning & Cost',
     description:
-      'Per-subcomponent schedule, NRE/unit cost estimates, Gantt-ready data, and roll-ups to the platform level.',
+      'Development timeline, prospective costs, and rollups keyed to the same Registry entity IDs.',
     icon: CalendarClock,
     path: '/planning',
-    ready: false,
   },
   {
     title: 'Suppliers',
     description:
-      'Candidate companies and products, make-vs-buy decisions, engagement status, and sourcing risk.',
+      'Master supplier directory linked to subsystems. Complements per-branch Vertical Integrators.',
     icon: Factory,
     path: '/suppliers',
-    ready: false,
   },
   {
     title: 'Change Control',
     description:
-      'Formal change records, impact analysis, baselines, and configuration effectivity.',
+      'ECRs, impact, status, and traceability back into affected Registry entities.',
     icon: GitBranch,
     path: '/changes',
-    ready: false,
+  },
+  {
+    title: 'Deep Research',
+    description:
+      'Company, product, cost, and manufacturing research via the same Grok / Claude (Bedrock) proxy as PID.',
+    icon: Search,
+    path: '/research',
   },
 ];
 
 const Dashboard: React.FC = () => {
   return (
-    <div className="p-8 max-w-6xl mx-auto">
-      <div className="mb-10">
-        <h1 className="text-4xl font-bold text-white">
-          Product Lifecycle Management Console
+    <div className="p-8 max-w-6xl mx-auto bg-zinc-950 text-white min-h-screen">
+      <div className="mb-8">
+        <h1 className="text-4xl font-bold flex items-center gap-3">
+          <LayoutDashboard className="text-blue-400" /> Dashboard
         </h1>
-        <p className="text-zinc-400 mt-2 text-lg">
-          Digital Thread · Trajectory Adjusting Rifle (TAR™)
-        </p>
+
+        {/* Platform Focus — under title */}
+        <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 md:p-8">
+          <h2 className="text-sm font-medium text-blue-400 uppercase tracking-wider mb-3">
+            Platform Focus
+          </h2>
+          <p className="text-zinc-300 leading-relaxed text-[15px]">
+            Vector tracks the complete <span className="text-white font-medium">TAR™</span>{' '}
+            (Trajectory Adjusting Rifle) product structure — architecture definition through
+            integration, fabrication, supplier engagement, planning, cost, change control, and
+            research. Each subsystem is an independent branch with its own constituents and
+            Vertical Integrator candidates. This console is the digital thread for unified
+            system development.
+          </p>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {cards.map((card) => {
-          const Icon = card.icon;
-          const content = (
-            <div
-              className={
-                'bg-zinc-900 border rounded-3xl p-7 h-full transition ' +
-                (card.ready
-                  ? 'border-zinc-800 hover:border-blue-600 cursor-pointer group'
-                  : 'border-zinc-800/60 opacity-60')
-              }
+      <h2 className="text-lg font-medium text-zinc-300 mb-4">Modules</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+        {modules.map((mod) => {
+          const Icon = mod.icon;
+          return (
+            <Link
+              key={mod.path}
+              to={mod.path}
+              className="bg-zinc-900 border border-zinc-800 hover:border-blue-600 rounded-3xl p-7 h-full transition group block"
             >
               <div className="flex items-start justify-between mb-4">
                 <div className="w-12 h-12 rounded-2xl bg-zinc-950 border border-zinc-700 flex items-center justify-center">
                   <Icon className="text-blue-400" size={22} />
                 </div>
-                {card.ready ? (
-                  <ArrowRight
-                    className="text-zinc-600 group-hover:text-blue-400 transition"
-                    size={20}
-                  />
-                ) : (
-                  <span className="text-[10px] uppercase tracking-wider text-zinc-600 border border-zinc-700 px-2 py-1 rounded-lg">
-                    Next
-                  </span>
-                )}
+                <ArrowRight
+                  className="text-zinc-600 group-hover:text-blue-400 transition"
+                  size={20}
+                />
               </div>
-              <h3 className="text-xl font-semibold text-white mb-2">{card.title}</h3>
-              <p className="text-sm text-zinc-400 leading-relaxed">{card.description}</p>
-            </div>
-          );
-
-          return card.ready ? (
-            <Link key={card.path} to={card.path}>
-              {content}
+              <h3 className="text-xl font-semibold text-white mb-2 group-hover:text-blue-300 transition">
+                {mod.title}
+              </h3>
+              <p className="text-sm text-zinc-400 leading-relaxed">{mod.description}</p>
             </Link>
-          ) : (
-            <div key={card.path}>{content}</div>
           );
         })}
-      </div>
-
-      <div className="mt-12 bg-zinc-900 border border-zinc-800 rounded-3xl p-8">
-        <h2 className="text-lg font-medium text-blue-400 mb-3">Platform Focus</h2>
-        <p className="text-zinc-300 leading-relaxed">
-          This console tracks the complete Advanced Weapons Systems — Trajectory Adjusting
-          Rifle (TAR™) product structure from architecture definition through custom
-          manufacturing, supplier engagement, and system integration. Each subcomponent is
-          an independent instance with its own schedule, cost, and vertical-integrator
-          candidates.
-        </p>
       </div>
     </div>
   );
