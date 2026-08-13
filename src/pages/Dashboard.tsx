@@ -62,25 +62,14 @@ const modules = [
 const Dashboard: React.FC = () => {
   return (
     <div className="p-8 max-w-6xl mx-auto bg-zinc-950 text-white min-h-screen">
-      <div className="mb-8">
+      <div className="mb-10 flex flex-wrap items-baseline gap-x-4 gap-y-2">
         <h1 className="text-4xl font-bold flex items-center gap-3">
-          <LayoutDashboard className="text-blue-400" /> Dashboard
+          <LayoutDashboard className="text-blue-400 shrink-0" />
+          Dashboard
         </h1>
-
-        {/* Platform Focus — under title */}
-        <div className="mt-6 bg-zinc-900 border border-zinc-800 rounded-3xl p-6 md:p-8">
-          <h2 className="text-sm font-medium text-blue-400 uppercase tracking-wider mb-3">
-            Platform Focus
-          </h2>
-          <p className="text-zinc-300 leading-relaxed text-[15px]">
-            Vector tracks the complete <span className="text-white font-medium">TAR™</span>{' '}
-            (Trajectory Adjusting Rifle) product structure — architecture definition through
-            integration, fabrication, supplier engagement, planning, cost, change control, and
-            research. Each subsystem is an independent branch with its own constituents and
-            Vertical Integrator candidates. This console is the digital thread for unified
-            system development.
-          </p>
-        </div>
+        <p className="text-sm text-zinc-400 font-normal">
+          TAR™ digital thread for unified system development.
+        </p>
       </div>
 
       <h2 className="text-lg font-medium text-zinc-300 mb-4">Modules</h2>

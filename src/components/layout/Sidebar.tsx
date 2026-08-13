@@ -16,8 +16,8 @@ interface SidebarProps {
 }
 
 const navItems = [
-  { path: '/system-architecture', label: 'System Architecture', icon: Crosshair },
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { path: '/system-architecture', label: 'System Architecture', icon: Crosshair },
   { path: '/system-registry', label: 'System Registry', icon: Box },
   { path: '/planning', label: 'Planning & Cost', icon: CalendarClock },
   { path: '/suppliers', label: 'Suppliers', icon: Factory },
