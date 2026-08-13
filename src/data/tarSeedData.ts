@@ -76,10 +76,6 @@ function withParent(parentId: string, nodes: ResourceEntity[]): ResourceEntity[]
   }));
 }
 
-// ---------------------------------------------------------------------------
-// Subsystems
-// ---------------------------------------------------------------------------
-
 const SUB_OPTICAL: ResourceEntity = e({
   id: 'sub-optical',
   name: 'Optical Sensor Integration',
@@ -180,40 +176,6 @@ const SUB_MACHINE_VISION: ResourceEntity = e({
   ]),
 });
 
-const SUB_PIXEL_TO_POSITION: ResourceEntity = e({
-  id: 'sub-pixel-to-position',
-  name: 'Pixel to Position',
-  type: 'Subsystem',
-  description:
-    'Map image-plane pixels and sensor measurements into weapon/world coordinates for aiming and trajectory adjustment.',
-  parentId: 'sys-tar',
-  tags: ['vision', 'coordinates', 'calibration'],
-  children: withParent('sub-pixel-to-position', [
-    e({
-      id: 'comp-ptp-calibration',
-      name: 'Calibration Model',
-      type: 'Component',
-      parentId: 'sub-pixel-to-position',
-      description: 'Intrinsic/extrinsic calibration and pixel-to-angle or pixel-to-world mapping.',
-    }),
-    e({
-      id: 'sw-ptp-pipeline',
-      name: 'Coordinate Pipeline',
-      type: 'SoftwareItem',
-      parentId: 'sub-pixel-to-position',
-      description: 'Software path from pixels/detections to position estimates.',
-    }),
-    e({
-      id: 'iface-ptp-output',
-      name: 'Position Output Interface',
-      type: 'Interface',
-      parentId: 'sub-pixel-to-position',
-      description: 'Output interface into ballistics / sensor fusion / closed loop.',
-    }),
-    verticalIntegrators('sub-pixel-to-position', 'Pixel to Position'),
-  ]),
-});
-
 const SUB_SENSOR_FUSION: ResourceEntity = e({
   id: 'sub-sensor-fusion',
   name: 'Sensor Fusion',
@@ -263,6 +225,41 @@ const SUB_BALLISTICS: ResourceEntity = e({
       description: 'Atmosphere, ammo, and related input models.',
     }),
     verticalIntegrators('sub-ballistics', 'Ballistic Computation'),
+  ]),
+});
+
+/** Sits immediately above Barrel Actuation in the platform tree */
+const SUB_PIXEL_TO_POSITION: ResourceEntity = e({
+  id: 'sub-pixel-to-position',
+  name: 'Pixel to Position',
+  type: 'Subsystem',
+  description:
+    'Map image-plane pixels and sensor measurements into weapon/world coordinates for aiming and trajectory adjustment.',
+  parentId: 'sys-tar',
+  tags: ['vision', 'coordinates', 'calibration'],
+  children: withParent('sub-pixel-to-position', [
+    e({
+      id: 'comp-ptp-calibration',
+      name: 'Calibration Model',
+      type: 'Component',
+      parentId: 'sub-pixel-to-position',
+      description: 'Intrinsic/extrinsic calibration and pixel-to-angle or pixel-to-world mapping.',
+    }),
+    e({
+      id: 'sw-ptp-pipeline',
+      name: 'Coordinate Pipeline',
+      type: 'SoftwareItem',
+      parentId: 'sub-pixel-to-position',
+      description: 'Software path from pixels/detections to position estimates.',
+    }),
+    e({
+      id: 'iface-ptp-output',
+      name: 'Position Output Interface',
+      type: 'Interface',
+      parentId: 'sub-pixel-to-position',
+      description: 'Output interface into ballistics / sensor fusion / closed loop / actuation.',
+    }),
+    verticalIntegrators('sub-pixel-to-position', 'Pixel to Position'),
   ]),
 });
 
@@ -429,10 +426,6 @@ const SUB_CLOSED_LOOP: ResourceEntity = e({
   ]),
 });
 
-// ---------------------------------------------------------------------------
-// System tree
-// ---------------------------------------------------------------------------
-
 export const TAR_SYSTEM: ResourceEntity = e({
   id: 'sys-tar',
   name: 'TAR™',
@@ -447,9 +440,9 @@ export const TAR_SYSTEM: ResourceEntity = e({
     SUB_OPTICAL,
     SUB_SCOPE,
     SUB_MACHINE_VISION,
-    SUB_PIXEL_TO_POSITION,
     SUB_SENSOR_FUSION,
     SUB_BALLISTICS,
+    SUB_PIXEL_TO_POSITION, // immediately above Barrel Actuation
     SUB_BARREL_ACTUATION,
     SUB_CHASSIS,
     SUB_RECEIVER,
@@ -465,15 +458,15 @@ export const SUBSYSTEM_COLORS: Record<string, string> = {
   'sub-optical': 'lime',
   'sub-scope': 'rose',
   'sub-machine-vision': 'sky',
-  'sub-pixel-to-position': 'teal',
   'sub-sensor-fusion': 'orange',
   'sub-ballistics': 'violet',
+  'sub-pixel-to-position': 'teal',
   'sub-barrel-actuation': 'red',
   'sub-chassis': 'yellow',
   'sub-receiver': 'cyan',
   'sub-trigger': 'pink',
   'sub-power': 'amber',
-  'sub-closed-loop': 'violet',
+  'sub-closed-loop': 'indigo',
 };
 
 function flattenTree(node: ResourceEntity, acc: ResourceEntity[] = []): ResourceEntity[] {
