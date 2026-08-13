@@ -76,39 +76,6 @@ function withParent(parentId: string, nodes: ResourceEntity[]): ResourceEntity[]
   }));
 }
 
-const SUB_OPTICAL: ResourceEntity = e({
-  id: 'sub-optical',
-  name: 'Optical Sensor Integration',
-  type: 'Subsystem',
-  description: 'Optical sensors, ranging, and sightline sensing for TAR™.',
-  parentId: 'sys-tar',
-  tags: ['optics', 'sensors'],
-  children: withParent('sub-optical', [
-    e({
-      id: 'comp-opt-architecture',
-      name: 'Optical System Architecture',
-      type: 'Component',
-      parentId: 'sub-optical',
-      description: 'Overall optical stack architecture and packaging.',
-    }),
-    e({
-      id: 'comp-opt-sensor-config',
-      name: 'Sensor Configuration',
-      type: 'Component',
-      parentId: 'sub-optical',
-      description: 'Sensor selection, FOV, resolution, and mounting.',
-    }),
-    e({
-      id: 'comp-opt-form-factor',
-      name: 'Form Factor Design',
-      type: 'Component',
-      parentId: 'sub-optical',
-      description: 'Mechanical envelope for optical packages on the rifle.',
-    }),
-    verticalIntegrators('sub-optical', 'Optical Sensor Integration'),
-  ]),
-});
-
 const SUB_SCOPE: ResourceEntity = e({
   id: 'sub-scope',
   name: 'Scope',
@@ -140,6 +107,39 @@ const SUB_SCOPE: ResourceEntity = e({
       description: 'Zero procedures, retention under recoil, and adjustment interfaces.',
     }),
     verticalIntegrators('sub-scope', 'Scope'),
+  ]),
+});
+
+const SUB_OPTICAL: ResourceEntity = e({
+  id: 'sub-optical',
+  name: 'Sensor Integration',
+  type: 'Subsystem',
+  description: 'Sensors, ranging, and sightline sensing for TAR™.',
+  parentId: 'sys-tar',
+  tags: ['sensors', 'integration'],
+  children: withParent('sub-optical', [
+    e({
+      id: 'comp-opt-architecture',
+      name: 'Sensor System Architecture',
+      type: 'Component',
+      parentId: 'sub-optical',
+      description: 'Overall sensor stack architecture and packaging.',
+    }),
+    e({
+      id: 'comp-opt-sensor-config',
+      name: 'Sensor Configuration',
+      type: 'Component',
+      parentId: 'sub-optical',
+      description: 'Sensor selection, FOV, resolution, and mounting.',
+    }),
+    e({
+      id: 'comp-opt-form-factor',
+      name: 'Form Factor Design',
+      type: 'Component',
+      parentId: 'sub-optical',
+      description: 'Mechanical envelope for sensor packages on the rifle.',
+    }),
+    verticalIntegrators('sub-optical', 'Sensor Integration'),
   ]),
 });
 
@@ -228,7 +228,6 @@ const SUB_BALLISTICS: ResourceEntity = e({
   ]),
 });
 
-/** Sits immediately above Barrel Actuation in the platform tree */
 const SUB_PIXEL_TO_POSITION: ResourceEntity = e({
   id: 'sub-pixel-to-position',
   name: 'Pixel to Position',
@@ -437,12 +436,12 @@ export const TAR_SYSTEM: ResourceEntity = e({
   status: 'in-design',
   revision: '0.9',
   children: [
-    SUB_OPTICAL,
-    SUB_SCOPE,
+    SUB_SCOPE,                 // 1st
+    SUB_OPTICAL,               // 2nd — Sensor Integration
     SUB_MACHINE_VISION,
     SUB_SENSOR_FUSION,
     SUB_BALLISTICS,
-    SUB_PIXEL_TO_POSITION, // immediately above Barrel Actuation
+    SUB_PIXEL_TO_POSITION,
     SUB_BARREL_ACTUATION,
     SUB_CHASSIS,
     SUB_RECEIVER,
@@ -455,8 +454,8 @@ export const TAR_SYSTEM: ResourceEntity = e({
 export const TAR_TREE = TAR_SYSTEM;
 
 export const SUBSYSTEM_COLORS: Record<string, string> = {
-  'sub-optical': 'lime',
   'sub-scope': 'rose',
+  'sub-optical': 'lime',
   'sub-machine-vision': 'sky',
   'sub-sensor-fusion': 'orange',
   'sub-ballistics': 'violet',

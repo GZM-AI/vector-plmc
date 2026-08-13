@@ -14,12 +14,11 @@ type Hotspot = {
 };
 
 const DEFAULT_HOTSPOTS: Hotspot[] = [
-  { id: 'sub-optical', label: 'Optical Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
   { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
+  { id: 'sub-optical', label: 'Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
   { id: 'sub-machine-vision', label: 'Machine Vision', left: 42, top: 20, width: 12, height: 14, color: '#0ea5e9' },
   { id: 'sub-sensor-fusion', label: 'Sensor Fusion', left: 32, top: 30, width: 12, height: 22, color: '#f97316' },
   { id: 'sub-ballistics', label: 'Ballistic Computation', left: 34, top: 38, width: 12, height: 20, color: '#d946ef' },
-  // Pixel to Position sits visually above Barrel Actuation
   { id: 'sub-pixel-to-position', label: 'Pixel to Position', left: 50, top: 22, width: 14, height: 12, color: '#14b8a6' },
   { id: 'sub-barrel-actuation', label: 'Barrel Actuation', left: 52, top: 28, width: 34, height: 26, color: '#ef4444' },
   { id: 'sub-chassis', label: 'Chassis', left: 10, top: 42, width: 16, height: 26, color: '#a3e635' },
