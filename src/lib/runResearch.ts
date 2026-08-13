@@ -1,4 +1,12 @@
+/**
+ * Deep Research — same pattern as PID Design Lab
+ * Claude → Lambda action "bedrockChat" (AWS Bedrock)
+ * Grok   → Lambda action "grokChat"
+ * Keys stay on the Lambda; browser only calls FUNCTION_URL.
+ */
+
 export type RunResearchInput = {
+  /** Research model option id from researchModels.ts */
   modelId: string;
   provider: 'grok' | 'claude';
   kind: string;
@@ -12,14 +20,32 @@ export type RunResearchInput = {
   } | null;
 };
 
+/** Same Function URL as PID DesignLab.tsx */
+const FUNCTION_URL =
+  (import.meta.env.VITE_RESEARCH_FUNCTION_URL as string | undefined) ||
+  'https://s3ffjht3dmkdohvyj26dd4iaeq0ikawh.lambda-url.us-west-2.on.aws/';
+
+async function callFunction(payload: Record<string, any>) {
+  const response = await fetch(FUNCTION_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.error) {
+    throw new Error(data.error || `Function error ${response.status}`);
+  }
+  return data;
+}
+
 function buildSystemPrompt(kind: string, entity: RunResearchInput['entityContext']) {
   const entityBlock = entity
     ? `\nRegistry context:\n- ${entity.type}: ${entity.name} (${entity.id})\n- ${entity.description || 'No description'}\n- Tags: ${(entity.tags || []).join(', ') || 'none'}\n`
     : '';
 
   return [
-    'You are a research assistant for Advanced Weapons Systems Vector PLM (TAR™ platform development).',
-    'Be concrete, structured, and source-aware when possible. Use bullet points.',
+    'You are a research assistant for Advanced Weapons Systems Vector PLM (TAR platform development).',
+    'Be concrete, structured, and source-aware when possible. Use bullet points and clear headings.',
     'Flag uncertainty. Do not invent part numbers or prices as facts.',
     `Research focus: ${kind}.`,
     'Respect ITAR/CUI: avoid requesting or elaborating controlled technical data the user did not provide.',
@@ -27,83 +53,50 @@ function buildSystemPrompt(kind: string, entity: RunResearchInput['entityContext
   ].join('\n');
 }
 
+function resolveApiModel(modelId: string, provider: 'grok' | 'claude'): string {
+  if (provider === 'grok') {
+    if (modelId === 'grok-4' || modelId === 'grok-3' || modelId === 'grok-3-mini') {
+      return 'grok-4.5';
+    }
+    return modelId || 'grok-4.5';
+  }
+  // Bedrock modelKey values used by PID
+  if (modelId.includes('opus')) return 'claude-opus';
+  if (modelId.includes('haiku')) return 'claude-sonnet'; // proxy may not expose haiku; use sonnet
+  if (modelId.includes('sonnet')) return 'claude-sonnet';
+  return modelId === 'claude-opus' || modelId === 'claude-sonnet' ? modelId : 'claude-sonnet';
+}
+
 export async function runResearch(input: RunResearchInput): Promise<string> {
   const system = buildSystemPrompt(input.kind, input.entityContext);
   const user = input.query.trim();
+  if (!user) throw new Error('Query is empty');
+
+  const apiModel = resolveApiModel(input.modelId, input.provider);
 
   if (input.provider === 'grok') {
-    return callGrok(input.modelId, system, user);
-  }
-  return callClaude(input.modelId, system, user);
-}
-
-async function callGrok(model: string, system: string, user: string): Promise<string> {
-  const key = import.meta.env.VITE_XAI_API_KEY as string | undefined;
-  if (!key) {
-    throw new Error('Missing VITE_XAI_API_KEY in .env.local');
-  }
-
-  const res = await fetch('https://api.x.ai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${key}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      temperature: 0.4,
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Grok API ${res.status}: ${text.slice(0, 400)}`);
-  }
-
-  const data = await res.json();
-  const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error('Grok returned empty content');
-  return typeof content === 'string' ? content : JSON.stringify(content);
-}
-
-async function callClaude(model: string, system: string, user: string): Promise<string> {
-  const key = import.meta.env.VITE_ANTHROPIC_API_KEY as string | undefined;
-  if (!key) {
-    throw new Error('Missing VITE_ANTHROPIC_API_KEY in .env.local');
-  }
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': key,
-      'anthropic-version': '2023-06-01',
-      // Browser calls may still fail CORS; prefer a backend proxy in production
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 4096,
+    const data = await callFunction({
+      action: 'grokChat',
+      model: apiModel,
+      temperature: 0.3,
+      max_tokens: 4000,
       system,
       messages: [{ role: 'user', content: user }],
-    }),
-  });
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Claude API ${res.status}: ${text.slice(0, 400)}`);
+    });
+    const text = data.text || data.content || '';
+    if (!text) throw new Error('Grok proxy returned empty text');
+    return typeof text === 'string' ? text : JSON.stringify(text);
   }
 
-  const data = await res.json();
-  const parts = data?.content || [];
-  const text = parts
-    .filter((p: any) => p.type === 'text')
-    .map((p: any) => p.text)
-    .join('\n');
-  if (!text) throw new Error('Claude returned empty content');
-  return text;
+  // Claude via Bedrock — same action as PID Design Lab
+  const data = await callFunction({
+    action: 'bedrockChat',
+    modelKey: apiModel, // "claude-opus" | "claude-sonnet"
+    prompt: `${system}\n\n---\n\nUser query:\n${user}`,
+    max_tokens: 4000,
+    temperature: 0.2,
+  });
+  const text = data.text || data.content || '';
+  if (!text) throw new Error('Bedrock proxy returned empty text');
+  return typeof text === 'string' ? text : JSON.stringify(text);
 }

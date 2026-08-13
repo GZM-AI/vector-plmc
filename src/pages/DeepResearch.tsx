@@ -56,7 +56,7 @@ const KIND_META: Record<
 const DeepResearch: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [provider, setProvider] = useState<ResearchProvider>('grok');
-  const [modelId, setModelId] = useState(modelsForProvider('grok')[0]?.id || 'grok-3');
+  const [modelId, setModelId] = useState(modelsForProvider('grok')[0]?.id || 'grok-4.5');
   const [kind, setKind] = useState<ResearchKind>('company');
   const [entityId, setEntityId] = useState('');
   const [query, setQuery] = useState('');
@@ -134,7 +134,7 @@ const DeepResearch: React.FC = () => {
             <Search className="text-blue-400" /> Deep Research
           </h1>
           <p className="text-zinc-400 mt-2">
-            Grok · Claude · Registry-aware context
+            Same proxy as PID · Grok · Claude (Bedrock) · Registry context
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -159,13 +159,13 @@ const DeepResearch: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-6 px-4 py-3 rounded-2xl bg-amber-950/40 border border-amber-900/50 text-amber-200 text-sm flex gap-3 items-start">
+      <div className="mb-6 px-4 py-3 rounded-2xl bg-blue-950/30 border border-blue-900/40 text-blue-200 text-sm flex gap-3 items-start">
         <AlertTriangle size={18} className="shrink-0 mt-0.5" />
         <div>
-          Keys via <code className="text-amber-100">VITE_XAI_API_KEY</code> /{' '}
-          <code className="text-amber-100">VITE_ANTHROPIC_API_KEY</code>. Browser calls may be
-          blocked by CORS — if so, move <code className="text-amber-100">runResearch</code> behind
-          an Amplify function (PID pattern). Treat outputs as advisory; watch ITAR/CUI.
+          Calls the <strong>same Lambda</strong> as PID Design Lab (
+          <code className="text-blue-100">bedrockChat</code> /{' '}
+          <code className="text-blue-100">grokChat</code>). Vendor API keys stay on the server.
+          If requests fail with CORS, allow this app origin on that Function URL.
         </div>
       </div>
 
@@ -294,10 +294,14 @@ const DeepResearch: React.FC = () => {
               </div>
             )}
             {!result && !running && !error && (
-              <p className="text-zinc-500 text-sm">Results stream into this panel after Run.</p>
+              <p className="text-zinc-500 text-sm">
+                Results appear here after Run (PID proxy response text).
+              </p>
             )}
             {running && (
-              <p className="text-zinc-400 text-sm animate-pulse">Calling {activeModelLabel}…</p>
+              <p className="text-zinc-400 text-sm animate-pulse">
+                Calling {activeModelLabel} via research proxy…
+              </p>
             )}
             {result && (
               <pre className="text-sm text-zinc-300 whitespace-pre-wrap font-sans leading-relaxed">

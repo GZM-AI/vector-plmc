@@ -3,49 +3,33 @@ export type ResearchProvider = 'grok' | 'claude';
 export type ResearchModelOption = {
   id: string;
   provider: ResearchProvider;
+  /** Value sent to the Lambda (Grok model id or Bedrock modelKey) */
+  apiModel: string;
   label: string;
   description: string;
 };
 
-/** Catalog — adjust ids to match what your PID / accounts support */
 export const RESEARCH_MODELS: ResearchModelOption[] = [
-  // xAI Grok
   {
-    id: 'grok-4',
+    id: 'grok-4.5',
     provider: 'grok',
-    label: 'Grok 4',
-    description: 'Flagship reasoning (xAI)',
+    apiModel: 'grok-4.5',
+    label: 'Grok 4.5',
+    description: 'Via PID research proxy (xAI)',
   },
   {
-    id: 'grok-3',
-    provider: 'grok',
-    label: 'Grok 3',
-    description: 'Strong general research',
-  },
-  {
-    id: 'grok-3-mini',
-    provider: 'grok',
-    label: 'Grok 3 Mini',
-    description: 'Faster / lighter',
-  },
-  // Anthropic Claude
-  {
-    id: 'claude-opus-4-20250514',
+    id: 'claude-opus',
     provider: 'claude',
-    label: 'Claude Opus 4',
-    description: 'Highest capability',
+    apiModel: 'claude-opus',
+    label: 'Claude Opus 4.1',
+    description: 'Via PID research proxy (AWS Bedrock)',
   },
   {
-    id: 'claude-sonnet-4-20250514',
+    id: 'claude-sonnet',
     provider: 'claude',
+    apiModel: 'claude-sonnet',
     label: 'Claude Sonnet 4',
-    description: 'Balanced speed / quality',
-  },
-  {
-    id: 'claude-3-5-haiku-20241022',
-    provider: 'claude',
-    label: 'Claude 3.5 Haiku',
-    description: 'Fast drafts',
+    description: 'Via PID research proxy (AWS Bedrock)',
   },
 ];
 
