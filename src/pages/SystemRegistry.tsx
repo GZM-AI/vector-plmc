@@ -20,6 +20,9 @@ import {
   Crosshair,
   LayoutGrid,
   ListTree,
+  Paperclip,
+  FileText,
+  Plus,
 } from 'lucide-react';
 import {
   TAR_TREE,
@@ -29,6 +32,8 @@ import {
   SUBSYSTEM_COLORS,
   ALL_ENTITIES,
 } from '../data/tarSeedData';
+import { documentsForEntity } from '../data/documentsSeed';
+import type { Document } from '../types/plm';
 
 type ViewMode = 'overview' | 'tree';
 
@@ -50,13 +55,23 @@ const TYPE_LABEL: Record<EntityType, string> = {
   Capability: 'Integrator',
 };
 
+/** Phase 0 release status styles (Draft | In Review | Released | Obsolete) */
 const STATUS_STYLE: Record<EntityStatus, string> = {
-  concept: 'bg-zinc-700 text-zinc-300',
-  'in-design': 'bg-blue-900/60 text-blue-300',
-  prototype: 'bg-amber-900/60 text-amber-300',
-  qualified: 'bg-emerald-900/60 text-emerald-300',
-  production: 'bg-green-900/60 text-green-300',
-  obsolete: 'bg-red-900/60 text-red-300',
+  Draft: 'bg-zinc-700 text-zinc-300',
+  'In Review': 'bg-blue-900/60 text-blue-300',
+  Released: 'bg-emerald-900/60 text-emerald-300',
+  Obsolete: 'bg-red-900/60 text-red-300',
+};
+
+const DOC_KIND_LABEL: Record<string, string> = {
+  spec: 'Spec',
+  drawing: 'Drawing',
+  cad: 'CAD',
+  'test-report': 'Test report',
+  photo: 'Photo',
+  analysis: 'Analysis',
+  procedure: 'Procedure',
+  other: 'Document',
 };
 
 const SUBSYSTEM_ACCENT: Record<string, string> = {
@@ -189,6 +204,11 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
       ? SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[entity.id] || 'sky'] || 'border-zinc-700'
       : 'border-zinc-700';
 
+  const linkedDocs: Document[] = useMemo(
+    () => documentsForEntity(entity.id),
+    [entity.id]
+  );
+
   return (
     <div className={`bg-zinc-900 border ${accent} rounded-3xl p-8 space-y-6`}>
       <div className="flex items-start justify-between gap-4">
@@ -205,7 +225,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
               <span className={`text-xs px-2.5 py-1 rounded-full ${STATUS_STYLE[entity.status]}`}>
                 {entity.status}
               </span>
-              <span className="text-xs text-zinc-500">Rev {entity.revision}</span>
+              <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-700 text-zinc-300">
+                Rev {entity.revision}
+              </span>
               {entity.classification && (
                 <span className="text-xs px-2.5 py-1 rounded-full bg-red-950/50 text-red-300 border border-red-900/50">
                   {entity.classification}
@@ -216,6 +238,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
         </div>
         <div className="text-xs text-zinc-500 text-right shrink-0">
           <div>ID: {entity.id}</div>
+          {entity.modifiedBy && <div className="mt-1">By: {entity.modifiedBy}</div>}
         </div>
       </div>
 
@@ -241,6 +264,66 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
           </div>
         </div>
       )}
+
+      {/* Phase 0 — Attachments */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <h4 className="text-sm font-medium text-blue-400 flex items-center gap-2">
+            <Paperclip size={14} />
+            Attachments ({linkedDocs.length})
+          </h4>
+          <button
+            type="button"
+            disabled
+            title="Upload wiring comes with Amplify Storage (Phase 0 UI shell)"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-700 text-zinc-500 cursor-not-allowed"
+          >
+            <Plus size={12} />
+            Attach document
+          </button>
+        </div>
+        {linkedDocs.length === 0 ? (
+          <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
+            No documents linked yet. Attachments preserve the hierarchy as navigation spine —
+            open any component to see revision + linked docs.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {linkedDocs.map((d) => (
+              <li
+                key={d.id}
+                className="flex items-start gap-3 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3"
+              >
+                <FileText size={16} className="text-sky-400 shrink-0 mt-0.5" />
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm text-white font-medium truncate">{d.name}</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-400">
+                      {DOC_KIND_LABEL[d.kind] ?? d.kind}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLE[d.status]}`}>
+                      {d.status}
+                    </span>
+                    <span className="text-[10px] text-zinc-500">Rev {d.revision}</span>
+                  </div>
+                  {d.description && (
+                    <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{d.description}</p>
+                  )}
+                  <div className="text-[10px] text-zinc-600 mt-1.5 flex flex-wrap gap-3">
+                    {d.fileName && <span>{d.fileName}</span>}
+                    {d.sizeBytes != null && (
+                      <span>{(d.sizeBytes / 1024).toFixed(0)} KB</span>
+                    )}
+                    <span>
+                      Updated {new Date(d.lastModified).toLocaleDateString()}
+                    </span>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
 
       {entity.children && entity.children.length > 0 && (
         <div>
@@ -273,9 +356,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
         {entity.createdAt && (
           <span>Created: {new Date(entity.createdAt).toLocaleDateString()}</span>
         )}
-        {entity.updatedAt && (
-          <span>Updated: {new Date(entity.updatedAt).toLocaleDateString()}</span>
+        {entity.lastModified && (
+          <span>Last modified: {new Date(entity.lastModified).toLocaleDateString()}</span>
         )}
+        {entity.modifiedBy && <span>By: {entity.modifiedBy}</span>}
       </div>
     </div>
   );

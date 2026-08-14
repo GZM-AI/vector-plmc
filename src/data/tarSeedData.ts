@@ -3,55 +3,50 @@
  * Vector · Product Lifecycle Management
  *
  * Vertical Integrators = per-subsystem candidates only (not shared).
+ *
+ * Phase 0: every entity carries revision + ReleaseStatus + lastModified/modifiedBy
+ * and optional attachmentIds linking to Document records (see documentsSeed.ts).
  */
-export type EntityType =
-  | 'System'
-  | 'Subsystem'
-  | 'Component'
-  | 'SoftwareItem'
-  | 'Interface'
-  | 'Capability';
+import type {
+  ResourceEntity,
+  StructuralEntityType,
+  ReleaseStatus,
+  LifecycleStage,
+  Classification,
+} from '../types/plm';
+import { DOCUMENTS } from './documentsSeed';
 
-export type EntityStatus =
-  | 'concept'
-  | 'in-design'
-  | 'prototype'
-  | 'qualified'
-  | 'production'
-  | 'obsolete';
+// Re-export types used by pages so existing imports from this module keep working
+export type { ResourceEntity, StructuralEntityType as EntityType, ReleaseStatus };
+export type EntityStatus = ReleaseStatus; // alias for gradual migration of STATUS_STYLE maps
 
-export interface ResourceEntity {
-  id: string;
-  name: string;
-  type: EntityType;
-  description?: string;
-  status: EntityStatus;
-  revision: string;
-  owner?: string;
-  classification?: 'UNCLASSIFIED' | 'CUI' | 'ITAR' | 'SECRET';
-  tags?: string[];
-  metadata?: Record<string, any>;
-  parentId: string | null;
-  children?: ResourceEntity[];
-  relatedIds?: string[];
-  createdAt?: string;
-  updatedAt?: string;
-}
+/** @deprecated Prefer ReleaseStatus; kept for any residual maturity display */
+export type { LifecycleStage };
 
 const now = new Date().toISOString();
 
 function e(
-  partial: Omit<ResourceEntity, 'createdAt' | 'updatedAt' | 'revision' | 'status'> & {
-    status?: EntityStatus;
+  partial: Omit<
+    ResourceEntity,
+    'createdAt' | 'lastModified' | 'revision' | 'status' | 'attachmentIds'
+  > & {
+    status?: ReleaseStatus;
     revision?: string;
+    lifecycleStage?: LifecycleStage;
+    lastModified?: string;
+    modifiedBy?: string;
+    attachmentIds?: string[];
+    classification?: Classification;
   }
 ): ResourceEntity {
   return {
-    status: 'concept',
+    status: 'Draft',
     revision: 'A',
     createdAt: now,
-    updatedAt: now,
-    classification: 'CUI',
+    lastModified: partial.lastModified ?? now,
+    modifiedBy: partial.modifiedBy ?? 'Zedekiah',
+    classification: partial.classification ?? 'CUI',
+    attachmentIds: partial.attachmentIds ?? [],
     ...partial,
   };
 }
@@ -84,6 +79,7 @@ const SUB_SCOPE: ResourceEntity = e({
     'Primary optic / magnified sight: mount interface, zeroing, eye relief, and optical path relative to trajectory control.',
   parentId: 'sys-tar',
   tags: ['optics', 'sight', 'scope'],
+  lifecycleStage: 'in-design',
   children: withParent('sub-scope', [
     e({
       id: 'comp-scope-optic',
@@ -105,6 +101,8 @@ const SUB_SCOPE: ResourceEntity = e({
       type: 'Component',
       parentId: 'sub-scope',
       description: 'Zero procedures, retention under recoil, and adjustment interfaces.',
+      attachmentIds: ['doc-scope-zero-proc'],
+      status: 'Released',
     }),
     verticalIntegrators('sub-scope', 'Scope'),
   ]),
@@ -117,6 +115,8 @@ const SUB_OPTICAL: ResourceEntity = e({
   description: 'Sensors, ranging, and sightline sensing for TAR™.',
   parentId: 'sys-tar',
   tags: ['sensors', 'integration'],
+  lifecycleStage: 'in-design',
+  attachmentIds: ['doc-opt-form-factor-spec'],
   children: withParent('sub-optical', [
     e({
       id: 'comp-opt-architecture',
@@ -138,6 +138,8 @@ const SUB_OPTICAL: ResourceEntity = e({
       type: 'Component',
       parentId: 'sub-optical',
       description: 'Mechanical envelope for sensor packages on the rifle.',
+      attachmentIds: ['doc-opt-form-factor-spec'],
+      status: 'In Review',
     }),
     verticalIntegrators('sub-optical', 'Sensor Integration'),
   ]),
@@ -150,6 +152,7 @@ const SUB_MACHINE_VISION: ResourceEntity = e({
   description: 'Vision pipeline: cameras, detection, and image-derived measurements.',
   parentId: 'sys-tar',
   tags: ['vision', 'camera'],
+  lifecycleStage: 'concept',
   children: withParent('sub-machine-vision', [
     e({
       id: 'comp-mv-camera',
@@ -164,6 +167,7 @@ const SUB_MACHINE_VISION: ResourceEntity = e({
       type: 'SoftwareItem',
       parentId: 'sub-machine-vision',
       description: 'Detection / tracking software path.',
+      attachmentIds: ['doc-mv-pipeline-arch'],
     }),
     e({
       id: 'iface-mv-rt',
@@ -183,6 +187,7 @@ const SUB_SENSOR_FUSION: ResourceEntity = e({
   description: 'State estimation fusing optical, IMU, and other sensing sources.',
   parentId: 'sys-tar',
   tags: ['fusion', 'estimation'],
+  lifecycleStage: 'concept',
   children: withParent('sub-sensor-fusion', [
     e({
       id: 'sw-sf-estimator',
@@ -209,6 +214,7 @@ const SUB_BALLISTICS: ResourceEntity = e({
   description: 'Ballistic solution engine and fire-control computation.',
   parentId: 'sys-tar',
   tags: ['ballistics', 'fire-control'],
+  lifecycleStage: 'concept',
   children: withParent('sub-ballistics', [
     e({
       id: 'sw-bal-engine',
@@ -236,6 +242,7 @@ const SUB_PIXEL_TO_POSITION: ResourceEntity = e({
     'Map image-plane pixels and sensor measurements into weapon/world coordinates for aiming and trajectory adjustment.',
   parentId: 'sys-tar',
   tags: ['vision', 'coordinates', 'calibration'],
+  lifecycleStage: 'concept',
   children: withParent('sub-pixel-to-position', [
     e({
       id: 'comp-ptp-calibration',
@@ -269,6 +276,8 @@ const SUB_BARREL_ACTUATION: ResourceEntity = e({
   description: 'Micro-actuation of barrel / aim vector for trajectory adjustment.',
   parentId: 'sys-tar',
   tags: ['actuation', 'mechanical'],
+  lifecycleStage: 'in-design',
+  attachmentIds: ['doc-ba-mount-drawing'],
   children: withParent('sub-barrel-actuation', [
     e({
       id: 'comp-ba-actuator',
@@ -283,6 +292,8 @@ const SUB_BARREL_ACTUATION: ResourceEntity = e({
       type: 'Component',
       parentId: 'sub-barrel-actuation',
       description: 'Structural interface to chassis/receiver.',
+      attachmentIds: ['doc-ba-mount-drawing'],
+      status: 'Draft',
     }),
     e({
       id: 'iface-ba-cmd',
@@ -299,23 +310,24 @@ const SUB_CHASSIS: ResourceEntity = e({
   id: 'sub-chassis',
   name: 'Chassis',
   type: 'Subsystem',
-  description: 'Chassis structure, ergonomics, and integration backbone.',
+  description: 'Primary structural chassis, ergonomics, and mounting rails.',
   parentId: 'sys-tar',
   tags: ['structure', 'mechanical'],
+  lifecycleStage: 'in-design',
   children: withParent('sub-chassis', [
     e({
       id: 'comp-ch-frame',
-      name: 'Primary Frame',
+      name: 'Chassis Frame',
       type: 'Component',
       parentId: 'sub-chassis',
-      description: 'Main structural chassis elements.',
+      description: 'Main structural member and rail geometry.',
     }),
     e({
       id: 'comp-ch-interfaces',
-      name: 'Subsystem Mount Points',
+      name: 'Subsystem Interfaces',
       type: 'Component',
       parentId: 'sub-chassis',
-      description: 'Mount geometry for optics, actuation, power, etc.',
+      description: 'Mechanical interfaces for optics, actuation, power, and receiver.',
     }),
     verticalIntegrators('sub-chassis', 'Chassis'),
   ]),
@@ -328,20 +340,21 @@ const SUB_RECEIVER: ResourceEntity = e({
   description: 'Receiver configuration, interfaces, and platform compatibility.',
   parentId: 'sys-tar',
   tags: ['receiver', 'mechanical'],
+  lifecycleStage: 'concept',
   children: withParent('sub-receiver', [
     e({
-      id: 'comp-rx-body',
-      name: 'Receiver Body',
+      id: 'comp-rc-upper',
+      name: 'Upper / Action Interface',
       type: 'Component',
       parentId: 'sub-receiver',
-      description: 'Receiver structure and baseline configuration.',
+      description: 'Receiver geometry and barrel/action interface.',
     }),
     e({
-      id: 'comp-rx-rail',
-      name: 'Rail / Accessory Interface',
+      id: 'comp-rc-compat',
+      name: 'Platform Compatibility',
       type: 'Component',
       parentId: 'sub-receiver',
-      description: 'Rails and accessory attachment.',
+      description: 'Compatibility with host platforms and standards.',
     }),
     verticalIntegrators('sub-receiver', 'Receiver Configuration'),
   ]),
@@ -354,20 +367,21 @@ const SUB_TRIGGER: ResourceEntity = e({
   description: 'Trigger group, safety, and fire-control interface.',
   parentId: 'sys-tar',
   tags: ['trigger', 'fire-control'],
+  lifecycleStage: 'concept',
   children: withParent('sub-trigger', [
     e({
-      id: 'comp-trg-group',
+      id: 'comp-tr-group',
       name: 'Trigger Group',
       type: 'Component',
       parentId: 'sub-trigger',
-      description: 'Trigger mechanism assembly.',
+      description: 'Mechanical trigger assembly and safety.',
     }),
     e({
-      id: 'comp-trg-safety',
-      name: 'Safety',
+      id: 'comp-tr-fc-iface',
+      name: 'Fire-Control Interface',
       type: 'Component',
       parentId: 'sub-trigger',
-      description: 'Safety selector / interlocks.',
+      description: 'Interface between trigger and electronic fire control if present.',
     }),
     verticalIntegrators('sub-trigger', 'Trigger'),
   ]),
@@ -377,23 +391,24 @@ const SUB_POWER: ResourceEntity = e({
   id: 'sub-power',
   name: 'Power',
   type: 'Subsystem',
-  description: 'Power generation, storage, distribution, and budgeting.',
+  description: 'Power generation, storage, distribution, and budget for electronics and actuation.',
   parentId: 'sys-tar',
-  tags: ['power', 'electronics'],
+  tags: ['power', 'electrical'],
+  lifecycleStage: 'concept',
   children: withParent('sub-power', [
     e({
-      id: 'comp-pwr-source',
-      name: 'Energy Source',
+      id: 'comp-pw-source',
+      name: 'Power Source',
       type: 'Component',
       parentId: 'sub-power',
-      description: 'Battery / primary energy package.',
+      description: 'Battery or other energy source packaging.',
     }),
     e({
-      id: 'comp-pwr-dist',
+      id: 'comp-pw-distribution',
       name: 'Power Distribution',
       type: 'Component',
       parentId: 'sub-power',
-      description: 'Distribution, regulation, and protection.',
+      description: 'Rails, regulation, and distribution to subsystems.',
     }),
     verticalIntegrators('sub-power', 'Power'),
   ]),
@@ -406,6 +421,7 @@ const SUB_CLOSED_LOOP: ResourceEntity = e({
   description: 'Closed-loop control linking sensing, computation, and actuation.',
   parentId: 'sys-tar',
   tags: ['control', 'software'],
+  lifecycleStage: 'concept',
   children: withParent('sub-closed-loop', [
     e({
       id: 'sw-cl-controller',
@@ -413,6 +429,7 @@ const SUB_CLOSED_LOOP: ResourceEntity = e({
       type: 'SoftwareItem',
       parentId: 'sub-closed-loop',
       description: 'Real-time control implementation.',
+      attachmentIds: ['doc-cl-control-law'],
     }),
     e({
       id: 'iface-cl-io',
@@ -433,11 +450,13 @@ export const TAR_SYSTEM: ResourceEntity = e({
     'Trajectory Adjusting Rifle — system-of-systems spanning sensing, computation, closed-loop control, and actuation.',
   tags: ['platform', 'TAR', 'prototype'],
   parentId: null,
-  status: 'in-design',
+  status: 'In Review',
   revision: '0.9',
+  lifecycleStage: 'in-design',
+  attachmentIds: ['doc-sys-tar-overview'],
   children: [
-    SUB_SCOPE,                 // 1st
-    SUB_OPTICAL,               // 2nd — Sensor Integration
+    SUB_SCOPE,
+    SUB_OPTICAL,
     SUB_MACHINE_VISION,
     SUB_SENSOR_FUSION,
     SUB_BALLISTICS,
@@ -475,3 +494,19 @@ function flattenTree(node: ResourceEntity, acc: ResourceEntity[] = []): Resource
 }
 
 export const ALL_ENTITIES: ResourceEntity[] = flattenTree(TAR_TREE);
+
+/**
+ * Ensure every Document.linkedEntityIds has a reciprocal attachmentIds entry
+ * (seed already sets both; this is a safety net for future edits).
+ */
+export function syncAttachmentLinks(): void {
+  for (const d of DOCUMENTS) {
+    for (const eid of d.linkedEntityIds) {
+      const ent = ALL_ENTITIES.find((x) => x.id === eid);
+      if (ent && !(ent.attachmentIds || []).includes(d.id)) {
+        ent.attachmentIds = [...(ent.attachmentIds || []), d.id];
+      }
+    }
+  }
+}
+syncAttachmentLinks();
