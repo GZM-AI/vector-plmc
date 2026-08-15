@@ -70,7 +70,7 @@ function hexToRgba(hex: string, alpha: number): string {
 
 const SystemArchitecture: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [showZones, setShowZones] = useState(true);
+  const [showZones, setShowZones] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [hotspots, setHotspots] = useState<Hotspot[]>(() => loadHotspots());
 
