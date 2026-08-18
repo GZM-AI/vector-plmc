@@ -1,52 +1,14 @@
-import React, { useMemo, useState, useRef, useEffect } from 'react';
+import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, Crosshair, Layers, ChevronRight, X, Move } from 'lucide-react';
+import { Box, Crosshair, Layers, ChevronRight, X, Move, Save, Cloud } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES } from '../data/tarSeedData';
-
-type Hotspot = {
-  id: string;
-  label: string;
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-  color: string;
-};
-
-const DEFAULT_HOTSPOTS: Hotspot[] = [
-  { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
-  { id: 'sub-optical', label: 'Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
-  { id: 'sub-machine-vision', label: 'Machine Vision', left: 42, top: 20, width: 12, height: 14, color: '#0ea5e9' },
-  { id: 'sub-sensor-fusion', label: 'Sensor Fusion', left: 32, top: 30, width: 12, height: 22, color: '#f97316' },
-  { id: 'sub-ballistics', label: 'Ballistic Computation', left: 34, top: 38, width: 12, height: 20, color: '#d946ef' },
-  { id: 'sub-pixel-to-position', label: 'Pixel to Position', left: 50, top: 22, width: 14, height: 12, color: '#14b8a6' },
-  { id: 'sub-barrel-actuation', label: 'Barrel Actuation', left: 52, top: 28, width: 34, height: 26, color: '#ef4444' },
-  { id: 'sub-chassis', label: 'Chassis', left: 10, top: 42, width: 16, height: 26, color: '#a3e635' },
-  { id: 'sub-receiver', label: 'Receiver Configuration', left: 30, top: 32, width: 14, height: 24, color: '#06b6d4' },
-  { id: 'sub-trigger', label: 'Trigger', left: 26, top: 48, width: 10, height: 14, color: '#fbbf24' },
-  { id: 'sub-power', label: 'Power', left: 28, top: 54, width: 12, height: 16, color: '#f8fafc' },
-  { id: 'sub-closed-loop', label: 'Closed Loop', left: 28, top: 34, width: 12, height: 22, color: '#6366f1' },
-];
-
-const STORAGE_KEY = 'vector-tar-hotspots-v3';
-
-function loadHotspots(): Hotspot[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
-    const parsed = JSON.parse(raw) as Hotspot[];
-    const byId = Object.fromEntries(parsed.map((h) => [h.id, h]));
-    return DEFAULT_HOTSPOTS.map((d) => ({
-      ...d,
-      left: byId[d.id]?.left ?? d.left,
-      top: byId[d.id]?.top ?? d.top,
-      width: byId[d.id]?.width ?? d.width,
-      height: byId[d.id]?.height ?? d.height,
-    }));
-  } catch {
-    return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
-  }
-}
+import {
+  type Hotspot,
+  DEFAULT_HOTSPOTS,
+  loadHotspotLayout,
+  saveHotspotLayout,
+  resetHotspotLayoutLocal,
+} from '../lib/hotspotLayoutStore';
 
 function findInTree(node: any, id: string): any | null {
   if (!node) return null;
@@ -72,7 +34,15 @@ const SystemArchitecture: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showZones, setShowZones] = useState(false);
   const [editMode, setEditMode] = useState(false);
-  const [hotspots, setHotspots] = useState<Hotspot[]>(() => loadHotspots());
+  const [hotspots, setHotspots] = useState<Hotspot[]>(() =>
+    DEFAULT_HOTSPOTS.map((h) => ({ ...h }))
+  );
+  const [layoutSource, setLayoutSource] = useState<'cloud' | 'local' | 'default' | 'loading'>(
+    'loading'
+  );
+  const [dirty, setDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const editModeRef = useRef(editMode);
@@ -89,10 +59,22 @@ const SystemArchitecture: React.FC = () => {
 
   editModeRef.current = editMode;
 
+  // Load shared layout once on mount (cloud → local cache → defaults)
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(hotspots));
-  }, [hotspots]);
+    let cancelled = false;
+    (async () => {
+      const result = await loadHotspotLayout();
+      if (cancelled) return;
+      setHotspots(result.hotspots);
+      setLayoutSource(result.source);
+      setDirty(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  // Drag handlers (draft only — does not publish)
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const drag = dragRef.current;
@@ -119,6 +101,7 @@ const SystemArchitecture: React.FC = () => {
           };
         })
       );
+      setDirty(true);
     };
     const onMouseUp = () => {
       dragRef.current = null;
@@ -183,9 +166,40 @@ const SystemArchitecture: React.FC = () => {
   const selectSubsystem = (id: string) => setActiveId(id);
 
   const resetZones = () => {
-    setHotspots(DEFAULT_HOTSPOTS.map((h) => ({ ...h })));
-    localStorage.removeItem(STORAGE_KEY);
+    const next = resetHotspotLayoutLocal();
+    setHotspots(next);
+    setDirty(true);
+    setLayoutSource('default');
+    setSaveMessage(null);
   };
+
+  const publishLayout = useCallback(async () => {
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const { cloudSaved } = await saveHotspotLayout(hotspots);
+      setDirty(false);
+      setLayoutSource(cloudSaved ? 'cloud' : 'local');
+      setSaveMessage(
+        cloudSaved
+          ? 'Layout saved for the team (cloud).'
+          : 'Layout saved on this device. Cloud not available yet — will sync when Amplify Data is live.'
+      );
+    } catch {
+      setSaveMessage('Save failed. Try again.');
+    } finally {
+      setSaving(false);
+    }
+  }, [hotspots]);
+
+  const sourceLabel =
+    layoutSource === 'loading'
+      ? 'Loading layout…'
+      : layoutSource === 'cloud'
+        ? 'Team layout (cloud)'
+        : layoutSource === 'local'
+          ? 'Layout from this device cache'
+          : 'Default layout';
 
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto min-h-screen text-white select-none">
@@ -196,10 +210,12 @@ const SystemArchitecture: React.FC = () => {
           </h1>
           <p className="text-zinc-400 mt-1">
             {editMode
-              ? 'EDIT ON — drag zones · white corner resizes'
+              ? dirty
+                ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
+                : 'EDIT ON — drag zones · white corner resizes'
               : showZones
-                ? `TAR™ · ${hotspots.length} zones · Click a zone or list item`
-                : 'TAR™ · Zones hidden · Select a subsystem to highlight it'}
+                ? `TAR™ · ${hotspots.length} zones · ${sourceLabel}`
+                : `TAR™ · Zones hidden · ${sourceLabel}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -213,16 +229,31 @@ const SystemArchitecture: React.FC = () => {
                 : 'bg-zinc-900 border-zinc-700 text-zinc-300')
             }
           >
-            <Move size={14} /> {editMode ? 'EDITING — click when done' : 'Edit zones'}
+            <Move size={14} /> {editMode ? 'Done editing' : 'Edit zones'}
           </button>
           {editMode && (
-            <button
-              type="button"
-              onClick={resetZones}
-              className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300"
-            >
-              Reset
-            </button>
+            <>
+              <button
+                type="button"
+                onClick={publishLayout}
+                disabled={saving || !dirty}
+                className={
+                  'px-4 py-2 rounded-xl text-sm border flex items-center gap-2 font-medium ' +
+                  (dirty && !saving
+                    ? 'bg-emerald-600 border-emerald-500 text-white'
+                    : 'bg-zinc-900 border-zinc-700 text-zinc-500 cursor-not-allowed')
+                }
+              >
+                <Save size={14} /> {saving ? 'Saving…' : 'Save layout'}
+              </button>
+              <button
+                type="button"
+                onClick={resetZones}
+                className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300"
+              >
+                Reset to defaults
+              </button>
+            </>
           )}
           <button
             type="button"
@@ -241,8 +272,22 @@ const SystemArchitecture: React.FC = () => {
       </div>
 
       {editMode && (
-        <div className="mb-4 px-4 py-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm">
-          Edit mode is ON. Drag colored boxes; use the white corner to resize.
+        <div className="mb-4 px-4 py-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm flex flex-wrap items-center gap-3">
+          <span>
+            Edit mode is ON. Drag colored boxes; use the white corner to resize. Click{' '}
+            <strong>Save layout</strong> to publish for every device.
+          </span>
+          {saveMessage && (
+            <span className="inline-flex items-center gap-1.5 text-emerald-300">
+              <Cloud size={14} /> {saveMessage}
+            </span>
+          )}
+        </div>
+      )}
+
+      {!editMode && saveMessage && (
+        <div className="mb-4 px-4 py-2 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-sm flex items-center gap-2">
+          <Cloud size={14} /> {saveMessage}
         </div>
       )}
 

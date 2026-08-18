@@ -1,0 +1,195 @@
+/**
+ * Shared Hotspot Layout Store
+ * ---------------------------
+ * Single source of truth for the TAR™ System Architecture zone map.
+ *
+ * Load order:
+ *   1. Amplify Data (when client is available)  → team-wide layout
+ *   2. localStorage cache                       → last known good / offline
+ *   3. DEFAULT_HOTSPOTS                         → bootstrap for brand-new env
+ *
+ * Save:
+ *   - Dragging only updates React state (draft).
+ *   - Explicit "Save layout" publishes to cloud + refreshes local cache.
+ *   - localStorage is still written as a fast offline cache, never as the
+ *     system of record once Amplify is live.
+ *
+ * Until Amplify Data model is deployed, the Amplify branch is a no-op and
+ * the store behaves like the old localStorage path (with clearer save semantics).
+ */
+
+export type Hotspot = {
+  id: string;
+  label: string;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+  color: string;
+};
+
+/** Canonical bootstrap — also the Reset target. Update this in source when you
+ *  want a new baseline layout without requiring a cloud write. */
+export const DEFAULT_HOTSPOTS: Hotspot[] = [
+  { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
+  { id: 'sub-optical', label: 'Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
+  { id: 'sub-machine-vision', label: 'Machine Vision', left: 42, top: 20, width: 12, height: 14, color: '#0ea5e9' },
+  { id: 'sub-sensor-fusion', label: 'Sensor Fusion', left: 32, top: 30, width: 12, height: 22, color: '#f97316' },
+  { id: 'sub-ballistics', label: 'Ballistic Computation', left: 34, top: 38, width: 12, height: 20, color: '#d946ef' },
+  { id: 'sub-pixel-to-position', label: 'Pixel to Position', left: 50, top: 22, width: 14, height: 12, color: '#14b8a6' },
+  { id: 'sub-barrel-actuation', label: 'Barrel Actuation', left: 52, top: 28, width: 34, height: 26, color: '#ef4444' },
+  { id: 'sub-chassis', label: 'Chassis', left: 10, top: 42, width: 16, height: 26, color: '#a3e635' },
+  { id: 'sub-receiver', label: 'Receiver Configuration', left: 30, top: 32, width: 14, height: 24, color: '#06b6d4' },
+  { id: 'sub-trigger', label: 'Trigger', left: 26, top: 48, width: 10, height: 14, color: '#fbbf24' },
+  { id: 'sub-power', label: 'Power', left: 28, top: 54, width: 12, height: 16, color: '#f8fafc' },
+  { id: 'sub-closed-loop', label: 'Closed Loop', left: 28, top: 34, width: 12, height: 22, color: '#6366f1' },
+];
+
+const LOCAL_CACHE_KEY = 'vector-tar-hotspots-v3';
+/** Stable id for the single shared layout record in Amplify Data */
+export const LAYOUT_RECORD_KEY = 'tar-system-architecture-v1';
+
+function mergeWithDefaults(partial: Partial<Hotspot>[]): Hotspot[] {
+  const byId = Object.fromEntries(
+    partial.filter((h) => h && h.id).map((h) => [h.id as string, h])
+  );
+  return DEFAULT_HOTSPOTS.map((d) => ({
+    ...d,
+    left: byId[d.id]?.left ?? d.left,
+    top: byId[d.id]?.top ?? d.top,
+    width: byId[d.id]?.width ?? d.width,
+    height: byId[d.id]?.height ?? d.height,
+  }));
+}
+
+function readLocalCache(): Hotspot[] | null {
+  try {
+    const raw = localStorage.getItem(LOCAL_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Hotspot[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return mergeWithDefaults(parsed);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalCache(hotspots: Hotspot[]): void {
+  try {
+    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(hotspots));
+  } catch {
+    /* quota / private mode — ignore */
+  }
+}
+
+/**
+ * Optional Amplify client injection.
+ * When Amplify Data is ready, call configureHotspotAmplify(client) once at app boot.
+ * The client is expected to expose:
+ *   models.HotspotLayout.get({ id })
+ *   models.HotspotLayout.update({ id, zonesJson, updatedAt, updatedBy })
+ *   models.HotspotLayout.create({ id, zonesJson, updatedAt, updatedBy })
+ */
+type AmplifyLikeClient = {
+  models: {
+    HotspotLayout: {
+      get: (args: { id: string }) => Promise<{ data?: { zonesJson?: string } | null }>;
+      update: (args: {
+        id: string;
+        zonesJson: string;
+        updatedAt?: string;
+        updatedBy?: string;
+      }) => Promise<unknown>;
+      create: (args: {
+        id: string;
+        zonesJson: string;
+        updatedAt?: string;
+        updatedBy?: string;
+      }) => Promise<unknown>;
+    };
+  };
+};
+
+let amplifyClient: AmplifyLikeClient | null = null;
+
+export function configureHotspotAmplify(client: AmplifyLikeClient | null): void {
+  amplifyClient = client;
+}
+
+async function readFromCloud(): Promise<Hotspot[] | null> {
+  if (!amplifyClient) return null;
+  try {
+    const result = await amplifyClient.models.HotspotLayout.get({ id: LAYOUT_RECORD_KEY });
+    const json = result?.data?.zonesJson;
+    if (!json) return null;
+    const parsed = JSON.parse(json) as Hotspot[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return mergeWithDefaults(parsed);
+  } catch {
+    return null;
+  }
+}
+
+async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<boolean> {
+  if (!amplifyClient) return false;
+  const payload = {
+    id: LAYOUT_RECORD_KEY,
+    zonesJson: JSON.stringify(hotspots),
+    updatedAt: new Date().toISOString(),
+    updatedBy: updatedBy || 'unknown',
+  };
+  try {
+    // Try update first; if record does not exist, create.
+    try {
+      await amplifyClient.models.HotspotLayout.update(payload);
+    } catch {
+      await amplifyClient.models.HotspotLayout.create(payload);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export type LoadResult = {
+  hotspots: Hotspot[];
+  source: 'cloud' | 'local' | 'default';
+};
+
+/** Load the team layout. Prefer cloud → local cache → defaults. */
+export async function loadHotspotLayout(): Promise<LoadResult> {
+  const cloud = await readFromCloud();
+  if (cloud) {
+    writeLocalCache(cloud); // keep offline cache fresh
+    return { hotspots: cloud, source: 'cloud' };
+  }
+  const local = readLocalCache();
+  if (local) return { hotspots: local, source: 'local' };
+  return { hotspots: DEFAULT_HOTSPOTS.map((h) => ({ ...h })), source: 'default' };
+}
+
+/**
+ * Publish the designed layout.
+ * Writes to cloud (when available) and always refreshes the local cache.
+ * Returns whether the cloud write succeeded.
+ */
+export async function saveHotspotLayout(
+  hotspots: Hotspot[],
+  updatedBy?: string
+): Promise<{ cloudSaved: boolean }> {
+  writeLocalCache(hotspots);
+  const cloudSaved = await writeToCloud(hotspots, updatedBy);
+  return { cloudSaved };
+}
+
+/** Reset to the code-level DEFAULT_HOTSPOTS and clear local cache.
+ *  Does not automatically delete the cloud record — call save after reset
+ *  if you want the team layout to become the defaults again. */
+export function resetHotspotLayoutLocal(): Hotspot[] {
+  try {
+    localStorage.removeItem(LOCAL_CACHE_KEY);
+  } catch {
+    /* ignore */
+  }
+  return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+}
