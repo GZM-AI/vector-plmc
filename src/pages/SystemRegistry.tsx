@@ -43,6 +43,7 @@ import {
   bumpEntityRevision,
   getHistoryForEntity,
   subscribeConfigStore,
+  updateEntityFields,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
 
@@ -241,6 +242,23 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [compareA, setCompareA] = useState<string>('');
   const [compareB, setCompareB] = useState<string>('');
 
+  const [editing, setEditing] = useState(false);
+  const [draftName, setDraftName] = useState(entity.name);
+  const [draftDescription, setDraftDescription] = useState(entity.description || '');
+  const [draftNotes, setDraftNotes] = useState(
+    (entity as ResourceEntity & { notes?: string }).notes || ''
+  );
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+
+  // Keep drafts in sync when selecting another entity or overlay updates
+  useEffect(() => {
+    setDraftName(entity.name);
+    setDraftDescription(entity.description || '');
+    setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setEditing(false);
+    setSaveMsg(null);
+  }, [entity.id, entity.name, entity.description, entity.revision]);
+
   const previewNext = nextRevision(entity.revision);
 
   const handleBump = () => {
@@ -252,6 +270,34 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       setBumpComment('');
       setBumpStatus('Draft');
       setShowBump(false);
+    }
+  };
+
+  const handleStartEdit = () => {
+    setDraftName(entity.name);
+    setDraftDescription(entity.description || '');
+    setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setEditing(true);
+    setSaveMsg(null);
+  };
+
+  const handleCancelEdit = () => {
+    setDraftName(entity.name);
+    setDraftDescription(entity.description || '');
+    setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setEditing(false);
+    setSaveMsg(null);
+  };
+
+  const handleSaveFields = () => {
+    const updated = updateEntityFields(entity.id, {
+      name: draftName.trim() || entity.name,
+      description: draftDescription,
+      notes: draftNotes,
+    });
+    if (updated) {
+      setEditing(false);
+      setSaveMsg('Saved on this device. Cloud sync comes next (same pattern as zone map).');
     }
   };
 
@@ -275,8 +321,16 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           <div className="w-12 h-12 rounded-2xl bg-zinc-950 border border-zinc-700 flex items-center justify-center shrink-0">
             {TYPE_ICON[entity.type]}
           </div>
-          <div>
-            <h2 className="text-2xl font-semibold text-white">{entity.name}</h2>
+          <div className="min-w-0">
+            {editing ? (
+              <input
+                value={draftName}
+                onChange={(e) => setDraftName(e.target.value)}
+                className="w-full max-w-xl bg-zinc-950 border border-zinc-600 rounded-xl px-3 py-2 text-xl font-semibold text-white focus:outline-none focus:border-blue-500"
+              />
+            ) : (
+              <h2 className="text-2xl font-semibold text-white">{entity.name}</h2>
+            )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
                 {TYPE_LABEL[entity.type]}
@@ -298,16 +352,50 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         <div className="text-xs text-zinc-500 text-right shrink-0 space-y-2">
           <div>ID: {entity.id}</div>
           {entity.modifiedBy && <div>By: {entity.modifiedBy}</div>}
-          <button
-            type="button"
-            onClick={() => setShowBump((v) => !v)}
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-blue-600/20 border border-blue-700/50 text-blue-300 hover:bg-blue-600/30"
-          >
-            <ArrowUpCircle size={12} />
-            Bump revision
-          </button>
+          <div className="flex flex-col items-end gap-2">
+            {!editing ? (
+              <button
+                type="button"
+                onClick={handleStartEdit}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"
+              >
+                Edit details
+              </button>
+            ) : (
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleSaveFields}
+                  className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-emerald-600 text-white hover:bg-emerald-500"
+                >
+                  Save
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelEdit}
+                  className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 text-zinc-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowBump((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-blue-600/20 border border-blue-700/50 text-blue-300 hover:bg-blue-600/30"
+            >
+              <ArrowUpCircle size={12} />
+              Bump revision
+            </button>
+          </div>
         </div>
       </div>
+
+      {saveMsg && (
+        <div className="text-xs text-emerald-300/90 bg-emerald-950/30 border border-emerald-800/40 rounded-xl px-3 py-2">
+          {saveMsg}
+        </div>
+      )}
 
       {showBump && (
         <div className="bg-zinc-950 border border-blue-900/40 rounded-2xl p-4 space-y-3">
@@ -359,12 +447,41 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
-      {entity.description && (
-        <div>
-          <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
+      <div>
+        <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
+        {editing ? (
+          <textarea
+            value={draftDescription}
+            onChange={(e) => setDraftDescription(e.target.value)}
+            rows={5}
+            placeholder="Describe this subsystem, component, or software item…"
+            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed focus:outline-none focus:border-blue-500 resize-y min-h-[120px]"
+          />
+        ) : entity.description ? (
           <p className="text-zinc-300 leading-relaxed text-[15px]">{entity.description}</p>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-zinc-600">No description yet. Click Edit details to add one.</p>
+        )}
+      </div>
+
+      <div>
+        <h4 className="text-sm font-medium text-blue-400 mb-2">Notes</h4>
+        {editing ? (
+          <textarea
+            value={draftNotes}
+            onChange={(e) => setDraftNotes(e.target.value)}
+            rows={3}
+            placeholder="Working notes, open questions, links to decisions…"
+            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed focus:outline-none focus:border-blue-500 resize-y"
+          />
+        ) : (entity as ResourceEntity & { notes?: string }).notes ? (
+          <p className="text-zinc-400 leading-relaxed text-sm whitespace-pre-wrap">
+            {(entity as ResourceEntity & { notes?: string }).notes}
+          </p>
+        ) : (
+          <p className="text-xs text-zinc-600">No notes yet.</p>
+        )}
+      </div>
 
       {entity.tags && entity.tags.length > 0 && (
         <div>

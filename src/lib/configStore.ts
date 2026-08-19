@@ -1,7 +1,7 @@
 /**
  * Phase 1 — Client configuration store
- * Persists revision overlays, history appends, and baselines in localStorage
- * until Amplify Data is wired. System Architecture is not affected.
+ * Persists revision overlays, field edits (name/description/notes), history,
+ * and baselines in localStorage until Amplify Data is wired.
  */
 import type { Baseline, ReleaseStatus, ResourceEntity, RevisionRecord } from '../types/plm';
 import { ALL_ENTITIES } from '../data/tarSeedData';
@@ -16,6 +16,10 @@ export type EntityOverlay = {
   status: ReleaseStatus;
   lastModified: string;
   modifiedBy?: string;
+  /** Field overlays — when set, replace seed values in the UI */
+  name?: string;
+  description?: string;
+  notes?: string;
 };
 
 type StoreState = {
@@ -67,17 +71,21 @@ export function getConfigState(): StoreState {
   return state;
 }
 
-/** Merge seed entity with any revision overlay */
+/** Merge seed entity with revision + field overlays */
 export function applyOverlay(entity: ResourceEntity): ResourceEntity {
   const o = state.overlays[entity.id];
   if (!o) return entity;
   return {
     ...entity,
-    revision: o.revision,
-    status: o.status,
-    lastModified: o.lastModified,
+    revision: o.revision ?? entity.revision,
+    status: o.status ?? entity.status,
+    lastModified: o.lastModified ?? entity.lastModified,
     modifiedBy: o.modifiedBy ?? entity.modifiedBy,
-  };
+    name: o.name !== undefined ? o.name : entity.name,
+    description: o.description !== undefined ? o.description : entity.description,
+    // notes is overlay-only until schema adds it; stash on entity via cast for UI
+    ...(o.notes !== undefined ? { notes: o.notes } : {}),
+  } as ResourceEntity & { notes?: string };
 }
 
 export function getEntityById(id: string): ResourceEntity | undefined {
@@ -102,8 +110,55 @@ export function getAllBaselines(): Baseline[] {
 }
 
 /**
+ * Update editable fields on an entity (name, description, notes).
+ * Does not bump revision by itself — caller can bump after if desired.
+ */
+export function updateEntityFields(
+  entityId: string,
+  fields: {
+    name?: string;
+    description?: string;
+    notes?: string;
+    modifiedBy?: string;
+  }
+): ResourceEntity | null {
+  const current = getEntityById(entityId);
+  if (!current) return null;
+
+  const prev = state.overlays[entityId];
+  const now = new Date().toISOString();
+  const by = fields.modifiedBy ?? 'Zedekiah';
+
+  const nextOverlay: EntityOverlay = {
+    revision: prev?.revision ?? current.revision,
+    status: prev?.status ?? current.status,
+    lastModified: now,
+    modifiedBy: by,
+    name: fields.name !== undefined ? fields.name : prev?.name,
+    description: fields.description !== undefined ? fields.description : prev?.description,
+    notes: fields.notes !== undefined ? fields.notes : prev?.notes,
+  };
+
+  // If name/description/notes explicitly passed as empty string, keep them (clear is valid)
+  if (fields.name !== undefined) nextOverlay.name = fields.name;
+  if (fields.description !== undefined) nextOverlay.description = fields.description;
+  if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
+
+  state = {
+    ...state,
+    overlays: {
+      ...state.overlays,
+      [entityId]: nextOverlay,
+    },
+  };
+  save(state);
+  notify();
+  return applyOverlay(current);
+}
+
+/**
  * Bump entity revision: updates overlay, appends immutable history record.
- * Returns the new revision string.
+ * Preserves any field overlays (name/description/notes).
  */
 export function bumpEntityRevision(
   entityId: string,
@@ -117,6 +172,7 @@ export function bumpEntityRevision(
   const current = getEntityById(entityId);
   if (!current) return null;
 
+  const prev = state.overlays[entityId];
   const newRev = nextRevision(current.revision);
   const newStatus: ReleaseStatus = opts?.status ?? 'Draft';
   const now = new Date().toISOString();
@@ -140,6 +196,9 @@ export function bumpEntityRevision(
         status: newStatus,
         lastModified: now,
         modifiedBy: by,
+        name: prev?.name,
+        description: prev?.description,
+        notes: prev?.notes,
       },
     },
     extraHistory: [...state.extraHistory, record],
@@ -156,7 +215,6 @@ export function createBaseline(input: {
   description?: string;
   status?: ReleaseStatus;
   createdBy?: string;
-  /** If omitted, freezes all entities */
   entityIds?: string[];
 }): Baseline {
   const entities = getAllEntitiesWithOverlays();
@@ -188,7 +246,6 @@ export function createBaseline(input: {
   return baseline;
 }
 
-/** Compare two revision labels for the same entity using history comments */
 export function compareEntityRevisions(
   entityId: string,
   revA: string,
