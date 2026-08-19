@@ -29,12 +29,10 @@ import {
   Bookmark,
 } from 'lucide-react';
 import {
-  TAR_TREE,
   ResourceEntity,
   EntityType,
   EntityStatus,
   SUBSYSTEM_COLORS,
-  ALL_ENTITIES,
 } from '../data/tarSeedData';
 import { documentsForEntity } from '../data/documentsSeed';
 import type { Document, ReleaseStatus, RevisionRecord } from '../types/plm';
@@ -44,6 +42,10 @@ import {
   getHistoryForEntity,
   subscribeConfigStore,
   updateEntityFields,
+  addChildEntity,
+  getRegistryTree,
+  getMergedAllEntities,
+  type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
 
@@ -249,6 +251,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     (entity as ResourceEntity & { notes?: string }).notes || ''
   );
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [showAddChild, setShowAddChild] = useState(false);
+  const [childName, setChildName] = useState('');
+  const [childType, setChildType] = useState<AddableChildType>('Component');
+  const [childDescription, setChildDescription] = useState('');
+
+  const canAddChild = entity.type === 'System' || entity.type === 'Subsystem';
 
   // Keep drafts in sync when selecting another entity or overlay updates
   useEffect(() => {
@@ -257,6 +265,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
     setEditing(false);
     setSaveMsg(null);
+    setShowAddChild(false);
+    setChildName('');
+    setChildDescription('');
+    setChildType('Component');
   }, [entity.id, entity.name, entity.description, entity.revision]);
 
   const previewNext = nextRevision(entity.revision);
@@ -298,6 +310,22 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     if (updated) {
       setEditing(false);
       setSaveMsg('Saved on this device. Cloud sync comes next (same pattern as zone map).');
+    }
+  };
+
+  const handleAddChild = () => {
+    const created = addChildEntity(entity.id, {
+      name: childName,
+      type: childType,
+      description: childDescription,
+    });
+    if (created) {
+      setShowAddChild(false);
+      setChildName('');
+      setChildDescription('');
+      setChildType('Component');
+      setSaveMsg(`Added “${created.name}” under ${entity.name}.`);
+      onSelectRelated?.(created.id);
     }
   };
 
@@ -669,34 +697,122 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {entity.children && entity.children.length > 0 && (
+      {(canAddChild || (entity.children && entity.children.length > 0)) && (
         <div>
-          <h4 className="text-sm font-medium text-blue-400 mb-3">
-            Contained Elements ({entity.children.length})
-          </h4>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {entity.children.map((child) => {
-              const c = applyOverlay(child);
-              return (
-                <button
-                  key={child.id}
-                  onClick={() => onSelectRelated?.(child.id)}
-                  className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    {TYPE_ICON[child.type]}
-                    <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
-                      {c.name}
-                    </span>
-                    <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
-                  </div>
-                  <p className="text-xs text-zinc-500 line-clamp-2">
-                    {c.description || TYPE_LABEL[child.type]}
-                  </p>
-                </button>
-              );
-            })}
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h4 className="text-sm font-medium text-blue-400">
+              Contained Elements ({entity.children?.length || 0})
+            </h4>
+            {canAddChild && (
+              <button
+                type="button"
+                onClick={() => setShowAddChild((v) => !v)}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-emerald-600/20 border border-emerald-700/50 text-emerald-300 hover:bg-emerald-600/30"
+              >
+                <Plus size={12} />
+                Add child
+              </button>
+            )}
           </div>
+
+          {showAddChild && (
+            <div className="mb-4 bg-zinc-950 border border-emerald-900/40 rounded-2xl p-4 space-y-3">
+              <p className="text-xs text-zinc-400">
+                Add a component, software item, interface, or integrator under{' '}
+                <span className="text-zinc-200">{entity.name}</span>.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-zinc-500 block mb-1">Name</label>
+                  <input
+                    value={childName}
+                    onChange={(e) => setChildName(e.target.value)}
+                    placeholder="e.g. Lens barrel assembly"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-zinc-500 block mb-1">Type</label>
+                  <select
+                    value={childType}
+                    onChange={(e) => setChildType(e.target.value as AddableChildType)}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                  >
+                    <option value="Component">Component</option>
+                    <option value="SoftwareItem">Software</option>
+                    <option value="Interface">Interface</option>
+                    <option value="Capability">Integrator</option>
+                  </select>
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-zinc-500 block mb-1">Description (optional)</label>
+                <textarea
+                  value={childDescription}
+                  onChange={(e) => setChildDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Short description…"
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500 resize-y"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleAddChild}
+                  disabled={!childName.trim()}
+                  className={
+                    'px-4 py-2 rounded-xl text-sm font-medium ' +
+                    (childName.trim()
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white'
+                      : 'bg-zinc-800 text-zinc-500 cursor-not-allowed')
+                  }
+                >
+                  Add to {entity.name}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddChild(false)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 text-sm text-zinc-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {entity.children && entity.children.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {entity.children.map((child) => {
+                const c = applyOverlay(child);
+                return (
+                  <button
+                    key={child.id}
+                    onClick={() => onSelectRelated?.(child.id)}
+                    className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
+                  >
+                    <div className="flex items-center gap-2 mb-1">
+                      {TYPE_ICON[child.type]}
+                      <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
+                        {c.name}
+                      </span>
+                      <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
+                    </div>
+                    <p className="text-xs text-zinc-500 line-clamp-2">
+                      {c.description || TYPE_LABEL[child.type]}
+                    </p>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            canAddChild &&
+            !showAddChild && (
+              <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
+                No children yet. Use <span className="text-zinc-400">Add child</span> to grow this
+                branch during R&amp;D.
+              </p>
+            )
+          )}
         </div>
       )}
 
@@ -788,11 +904,16 @@ const SubsystemOverviewCard: React.FC<{
 const SystemRegistry: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [viewMode, setViewMode] = useState<ViewMode>('overview');
-  const [selectedId, setSelectedId] = useState<string | null>(TAR_TREE.id);
-  const [expanded, setExpanded] = useState<Set<string>>(new Set([TAR_TREE.id]));
+  const [historyTick, setHistoryTick] = useState(0);
+
+  const registryTree = useMemo(() => getRegistryTree(), [historyTick]);
+  const allEntities = useMemo(() => getMergedAllEntities(), [historyTick]);
+  const rootId = registryTree.id;
+
+  const [selectedId, setSelectedId] = useState<string | null>(rootId);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set([rootId]));
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<EntityType | 'all'>('all');
-  const [historyTick, setHistoryTick] = useState(0);
 
   useEffect(() => subscribeConfigStore(() => setHistoryTick((t) => t + 1)), []);
 
@@ -800,7 +921,7 @@ const SystemRegistry: React.FC = () => {
     const id = searchParams.get('id');
     if (!id) return;
 
-    const entity = ALL_ENTITIES.find((e) => e.id === id);
+    const entity = allEntities.find((e) => e.id === id);
     if (!entity) return;
 
     setViewMode('tree');
@@ -810,28 +931,37 @@ const SystemRegistry: React.FC = () => {
     let current: ResourceEntity | undefined = entity;
     while (current?.parentId) {
       path.push(current.parentId);
-      current = ALL_ENTITIES.find((e) => e.id === current!.parentId);
+      current = allEntities.find((e) => e.id === current!.parentId);
     }
-    setExpanded((prev) => new Set([...prev, id, ...path, TAR_TREE.id]));
-  }, [searchParams]);
+    setExpanded((prev) => new Set([...prev, id, ...path, rootId]));
+  }, [searchParams, allEntities, rootId]);
 
   useEffect(() => {
     if (typeFilter === 'all' || viewMode !== 'tree') return;
-    const parents = new Set<string>([TAR_TREE.id]);
-    ALL_ENTITIES.forEach((e) => {
+    const parents = new Set<string>([rootId]);
+    allEntities.forEach((e) => {
       if (e.type === typeFilter && e.parentId) parents.add(e.parentId);
     });
     setExpanded((prev) => new Set([...prev, ...parents]));
-  }, [typeFilter, viewMode]);
+  }, [typeFilter, viewMode, allEntities, rootId]);
 
   const selected = useMemo(() => {
     if (!selectedId) return null;
-    return ALL_ENTITIES.find((e) => e.id === selectedId) || null;
-  }, [selectedId, historyTick]);
+    const findInTree = (node: ResourceEntity, id: string): ResourceEntity | null => {
+      if (node.id === id) return node;
+      for (const c of node.children || []) {
+        const found = findInTree(c, id);
+        if (found) return found;
+      }
+      return null;
+    };
+    // Prefer tree node so Contained Elements includes seed + user-added children
+    return findInTree(registryTree, selectedId) || allEntities.find((e) => e.id === selectedId) || null;
+  }, [selectedId, registryTree, allEntities]);
 
   const subsystems = useMemo(
-    () => (TAR_TREE.children || []).filter((c) => c.type === 'Subsystem'),
-    []
+    () => (registryTree.children || []).filter((c) => c.type === 'Subsystem'),
+    [registryTree]
   );
 
   const filteredSubsystems = useMemo(() => {
@@ -864,12 +994,12 @@ const SystemRegistry: React.FC = () => {
     setViewMode('tree');
     setTypeFilter('all');
     setSelectedId(id);
-    const entity = ALL_ENTITIES.find((e) => e.id === id);
-    const path: string[] = [TAR_TREE.id];
+    const entity = allEntities.find((e) => e.id === id);
+    const path: string[] = [rootId];
     let current: ResourceEntity | undefined = entity;
     while (current?.parentId) {
       path.push(current.parentId);
-      current = ALL_ENTITIES.find((e) => e.id === current!.parentId);
+      current = allEntities.find((e) => e.id === current!.parentId);
     }
     if (entity) path.push(entity.id);
     setExpanded((prev) => new Set([...prev, ...path]));
@@ -877,14 +1007,14 @@ const SystemRegistry: React.FC = () => {
 
   const handleSelectById = (id: string) => {
     setSelectedId(id);
-    const entity = ALL_ENTITIES.find((e) => e.id === id);
+    const entity = allEntities.find((e) => e.id === id);
     if (entity?.parentId) {
       setExpanded((prev) => new Set([...prev, entity.parentId!]));
     }
   };
 
-  const expandAll = () => setExpanded(new Set(ALL_ENTITIES.map((e) => e.id)));
-  const collapseAll = () => setExpanded(new Set([TAR_TREE.id]));
+  const expandAll = () => setExpanded(new Set(allEntities.map((e) => e.id)));
+  const collapseAll = () => setExpanded(new Set([rootId]));
 
   return (
     <div className="p-8 max-w-[1600px] mx-auto bg-zinc-950 text-white min-h-screen">
@@ -894,7 +1024,7 @@ const SystemRegistry: React.FC = () => {
             <Box className="text-blue-400" /> System Registry
           </h1>
           <p className="text-zinc-400 mt-2">
-            Digital Thread · TAR™ · {subsystems.length} subsystems · {ALL_ENTITIES.length} entities
+            Digital Thread · TAR™ · {subsystems.length} subsystems · {allEntities.length} entities
           </p>
         </div>
 
@@ -1013,7 +1143,7 @@ const SystemRegistry: React.FC = () => {
 
             <div className="flex-1 overflow-auto pr-1 space-y-0.5">
               <TreeNode
-                node={TAR_TREE}
+                node={registryTree}
                 depth={0}
                 selectedId={selectedId}
                 expanded={expanded}

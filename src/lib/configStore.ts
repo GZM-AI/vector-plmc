@@ -1,10 +1,16 @@
 /**
  * Phase 1 — Client configuration store
- * Persists revision overlays, field edits (name/description/notes), history,
+ * Persists revision overlays, field edits, user-added children, history,
  * and baselines in localStorage until Amplify Data is wired.
  */
-import type { Baseline, ReleaseStatus, ResourceEntity, RevisionRecord } from '../types/plm';
-import { ALL_ENTITIES } from '../data/tarSeedData';
+import type {
+  Baseline,
+  ReleaseStatus,
+  ResourceEntity,
+  RevisionRecord,
+  StructuralEntityType,
+} from '../types/plm';
+import { ALL_ENTITIES, TAR_TREE } from '../data/tarSeedData';
 import { SEED_REVISION_HISTORY } from '../data/revisionSeed';
 import { SEED_BASELINES } from '../data/baselinesSeed';
 import { makeRevisionRecord, nextRevision, sortHistoryNewestFirst } from './revisionUtils';
@@ -16,20 +22,26 @@ export type EntityOverlay = {
   status: ReleaseStatus;
   lastModified: string;
   modifiedBy?: string;
-  /** Field overlays — when set, replace seed values in the UI */
   name?: string;
   description?: string;
   notes?: string;
 };
 
+/** Child types users can add under System / Subsystem (R&D) */
+export type AddableChildType = Extract<
+  StructuralEntityType,
+  'Component' | 'SoftwareItem' | 'Interface' | 'Capability'
+>;
+
 type StoreState = {
   overlays: Record<string, EntityOverlay>;
+  extraEntities: ResourceEntity[];
   extraHistory: RevisionRecord[];
   extraBaselines: Baseline[];
 };
 
 function emptyState(): StoreState {
-  return { overlays: {}, extraHistory: [], extraBaselines: [] };
+  return { overlays: {}, extraEntities: [], extraHistory: [], extraBaselines: [] };
 }
 
 function load(): StoreState {
@@ -39,6 +51,7 @@ function load(): StoreState {
     const parsed = JSON.parse(raw) as StoreState;
     return {
       overlays: parsed.overlays || {},
+      extraEntities: parsed.extraEntities || [],
       extraHistory: parsed.extraHistory || [],
       extraBaselines: parsed.extraBaselines || [],
     };
@@ -83,18 +96,40 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
     modifiedBy: o.modifiedBy ?? entity.modifiedBy,
     name: o.name !== undefined ? o.name : entity.name,
     description: o.description !== undefined ? o.description : entity.description,
-    // notes is overlay-only until schema adds it; stash on entity via cast for UI
     ...(o.notes !== undefined ? { notes: o.notes } : {}),
   } as ResourceEntity & { notes?: string };
 }
 
+/** Flat list: seed + user-created entities, with overlays applied */
+export function getMergedAllEntities(): ResourceEntity[] {
+  const seedIds = new Set(ALL_ENTITIES.map((e) => e.id));
+  const extras = state.extraEntities.filter((e) => !seedIds.has(e.id));
+  return [...ALL_ENTITIES, ...extras].map((e) => applyOverlay(e));
+}
+
+/**
+ * Nested tree for Registry: seed TAR_TREE + inject user children by parentId.
+ */
+export function getRegistryTree(): ResourceEntity {
+  const inject = (node: ResourceEntity): ResourceEntity => {
+    const base = applyOverlay(node);
+    const seedChildren = (node.children || []).map(inject);
+    const extrasHere = state.extraEntities
+      .filter((e) => e.parentId === node.id)
+      .map((e) => inject(e));
+    const seen = new Set(seedChildren.map((c) => c.id));
+    const children = [...seedChildren, ...extrasHere.filter((c) => !seen.has(c.id))];
+    return { ...base, children };
+  };
+  return inject(TAR_TREE);
+}
+
 export function getEntityById(id: string): ResourceEntity | undefined {
-  const base = ALL_ENTITIES.find((e) => e.id === id);
-  return base ? applyOverlay(base) : undefined;
+  return getMergedAllEntities().find((e) => e.id === id);
 }
 
 export function getAllEntitiesWithOverlays(): ResourceEntity[] {
-  return ALL_ENTITIES.map(applyOverlay);
+  return getMergedAllEntities();
 }
 
 export function getHistoryForEntity(entityId: string): RevisionRecord[] {
@@ -109,10 +144,63 @@ export function getAllBaselines(): Baseline[] {
   );
 }
 
+function slugify(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 32) || 'item';
+}
+
 /**
- * Update editable fields on an entity (name, description, notes).
- * Does not bump revision by itself — caller can bump after if desired.
+ * Add a child under a System or Subsystem (R&D structure growth).
  */
+export function addChildEntity(
+  parentId: string,
+  input: {
+    name: string;
+    type: AddableChildType;
+    description?: string;
+    createdBy?: string;
+  }
+): ResourceEntity | null {
+  const parent = getEntityById(parentId) || ALL_ENTITIES.find((e) => e.id === parentId);
+  if (!parent) return null;
+  if (parent.type !== 'System' && parent.type !== 'Subsystem') {
+    console.warn('[configStore] addChildEntity: parent must be System or Subsystem');
+    return null;
+  }
+
+  const name = input.name.trim();
+  if (!name) return null;
+
+  const now = new Date().toISOString();
+  const by = input.createdBy ?? 'Zedekiah';
+  const id = `user-${parentId}-${slugify(name)}-${Date.now().toString(36)}`;
+
+  const entity: ResourceEntity = {
+    id,
+    name,
+    type: input.type,
+    description: input.description?.trim() || undefined,
+    parentId,
+    revision: 'A',
+    status: 'Draft',
+    createdAt: now,
+    lastModified: now,
+    modifiedBy: by,
+    children: [],
+  };
+
+  state = {
+    ...state,
+    extraEntities: [...state.extraEntities, entity],
+  };
+  save(state);
+  notify();
+  return applyOverlay(entity);
+}
+
 export function updateEntityFields(
   entityId: string,
   fields: {
@@ -129,6 +217,25 @@ export function updateEntityFields(
   const now = new Date().toISOString();
   const by = fields.modifiedBy ?? 'Zedekiah';
 
+  // Also patch extraEntities name/description so tree labels stay correct
+  if (state.extraEntities.some((e) => e.id === entityId)) {
+    state = {
+      ...state,
+      extraEntities: state.extraEntities.map((e) =>
+        e.id === entityId
+          ? {
+              ...e,
+              name: fields.name !== undefined ? fields.name : e.name,
+              description:
+                fields.description !== undefined ? fields.description : e.description,
+              lastModified: now,
+              modifiedBy: by,
+            }
+          : e
+      ),
+    };
+  }
+
   const nextOverlay: EntityOverlay = {
     revision: prev?.revision ?? current.revision,
     status: prev?.status ?? current.status,
@@ -139,7 +246,6 @@ export function updateEntityFields(
     notes: fields.notes !== undefined ? fields.notes : prev?.notes,
   };
 
-  // If name/description/notes explicitly passed as empty string, keep them (clear is valid)
   if (fields.name !== undefined) nextOverlay.name = fields.name;
   if (fields.description !== undefined) nextOverlay.description = fields.description;
   if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
@@ -153,13 +259,9 @@ export function updateEntityFields(
   };
   save(state);
   notify();
-  return applyOverlay(current);
+  return getEntityById(entityId) || null;
 }
 
-/**
- * Bump entity revision: updates overlay, appends immutable history record.
- * Preserves any field overlays (name/description/notes).
- */
 export function bumpEntityRevision(
   entityId: string,
   opts?: {
@@ -187,6 +289,18 @@ export function bumpEntityRevision(
     changesSummary: opts?.changesSummary,
   });
 
+  // Keep extra entity revision in sync
+  if (state.extraEntities.some((e) => e.id === entityId)) {
+    state = {
+      ...state,
+      extraEntities: state.extraEntities.map((e) =>
+        e.id === entityId
+          ? { ...e, revision: newRev, status: newStatus, lastModified: now, modifiedBy: by }
+          : e
+      ),
+    };
+  }
+
   state = {
     ...state,
     overlays: {
@@ -206,10 +320,11 @@ export function bumpEntityRevision(
   save(state);
   notify();
 
-  return { entity: applyOverlay(current), record };
+  const entity = getEntityById(entityId);
+  if (!entity) return null;
+  return { entity, record };
 }
 
-/** Freeze current (overlaid) revisions into a named baseline */
 export function createBaseline(input: {
   name: string;
   description?: string;
