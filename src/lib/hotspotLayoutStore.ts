@@ -1,8 +1,15 @@
 /**
- * Shared Hotspot Layout Store — aligned to amplify MapLayout model
- * layoutKey: "tar-system-architecture-v1"
- * Load: cloud → local cache → DEFAULT_HOTSPOTS
- * Save: explicit publish (Save layout button)
+ * Shared Hotspot Layout Store
+ * ---------------------------
+ * Team-wide TAR™ System Architecture zone map via Amplify Data MapLayout.
+ *
+ * Model: MapLayout
+ *   layoutKey: "tar-system-architecture-v1"
+ *   hotspotsJson: JSON.stringify(Hotspot[])
+ *   updatedBy?: string
+ *
+ * Load order: cloud → localStorage cache → DEFAULT_HOTSPOTS
+ * Save: explicit "Save layout" only (draft while dragging)
  */
 
 export type Hotspot = {
@@ -15,6 +22,7 @@ export type Hotspot = {
   color: string;
 };
 
+/** Bootstrap / Reset target */
 export const DEFAULT_HOTSPOTS: Hotspot[] = [
   { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
   { id: 'sub-optical', label: 'Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
@@ -62,7 +70,7 @@ function writeLocalCache(hotspots: Hotspot[]): void {
   try {
     localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(hotspots));
   } catch {
-    /* ignore */
+    /* ignore quota / private mode */
   }
 }
 
@@ -72,17 +80,20 @@ type AmplifyLikeClient = {
     MapLayout: {
       get: (args: {
         layoutKey: string;
-      }) => Promise<{ data?: { hotspotsJson?: string; layoutKey?: string } | null }>;
+      }) => Promise<{
+        data?: { hotspotsJson?: string; layoutKey?: string } | null;
+        errors?: unknown[];
+      }>;
       update: (args: {
         layoutKey: string;
         hotspotsJson: string;
         updatedBy?: string;
-      }) => Promise<unknown>;
+      }) => Promise<{ data?: unknown; errors?: unknown[] }>;
       create: (args: {
         layoutKey: string;
         hotspotsJson: string;
         updatedBy?: string;
-      }) => Promise<unknown>;
+      }) => Promise<{ data?: unknown; errors?: unknown[] }>;
     };
   };
 };
@@ -93,18 +104,39 @@ export function configureHotspotAmplify(client: AmplifyLikeClient | null): void 
   amplifyClient = client;
 }
 
+function hasErrors(result: { errors?: unknown[] } | null | undefined): boolean {
+  return Array.isArray(result?.errors) && result!.errors!.length > 0;
+}
+
 async function readFromCloud(): Promise<Hotspot[] | null> {
-  if (!amplifyClient) return null;
+  if (!amplifyClient) {
+    console.warn('[hotspotLayout] load: no client');
+    return null;
+  }
   try {
     const result = await amplifyClient.models.MapLayout.get({
       layoutKey: LAYOUT_RECORD_KEY,
     });
+    console.log('[hotspotLayout] GET raw', result);
+
+    if (hasErrors(result)) {
+      console.error('[hotspotLayout] GET errors', result.errors);
+      return null;
+    }
+
     const json = result?.data?.hotspotsJson;
-    if (!json) return null;
+    if (!json) {
+      console.warn('[hotspotLayout] GET: no row / no hotspotsJson');
+      return null;
+    }
+
     const parsed = JSON.parse(json) as Hotspot[];
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
+
+    console.log('[hotspotLayout] load from CLOUD', parsed.length, 'zones');
     return mergeWithDefaults(parsed);
-  } catch {
+  } catch (err) {
+    console.error('[hotspotLayout] GET failed', err);
     return null;
   }
 }
@@ -114,22 +146,41 @@ async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<bo
     console.warn('[hotspotLayout] no Amplify client — configureHotspotAmplify was not called');
     return false;
   }
+
   const payload = {
     layoutKey: LAYOUT_RECORD_KEY,
     hotspotsJson: JSON.stringify(hotspots),
     updatedBy: updatedBy || 'unknown',
   };
+
   try {
-    try {
-      await amplifyClient.models.MapLayout.update(payload);
-      console.log('[hotspotLayout] cloud UPDATE ok');
-      return true;
-    } catch (updateErr) {
-      console.warn('[hotspotLayout] UPDATE failed, trying CREATE', updateErr);
-      await amplifyClient.models.MapLayout.create(payload);
-      console.log('[hotspotLayout] cloud CREATE ok');
-      return true;
+    let result = await amplifyClient.models.MapLayout.update(payload);
+    console.log('[hotspotLayout] UPDATE raw', result);
+
+    if (hasErrors(result) || !result?.data) {
+      console.warn('[hotspotLayout] UPDATE did not stick, trying CREATE');
+      result = await amplifyClient.models.MapLayout.create(payload);
+      console.log('[hotspotLayout] CREATE raw', result);
+
+      if (hasErrors(result) || !result?.data) {
+        console.error('[hotspotLayout] CREATE failed', result?.errors || result);
+        return false;
+      }
     }
+
+    // Verify the row is actually readable
+    const verify = await amplifyClient.models.MapLayout.get({
+      layoutKey: LAYOUT_RECORD_KEY,
+    });
+    console.log('[hotspotLayout] VERIFY GET', verify);
+
+    if (hasErrors(verify) || !verify?.data?.hotspotsJson) {
+      console.error('[hotspotLayout] write reported ok but GET empty', verify?.errors || verify);
+      return false;
+    }
+
+    console.log('[hotspotLayout] cloud write verified');
+    return true;
   } catch (err) {
     console.error('[hotspotLayout] cloud write failed', err);
     return false;
@@ -141,17 +192,32 @@ export type LoadResult = {
   source: 'cloud' | 'local' | 'default';
 };
 
+/** Load team layout: cloud → local cache → defaults */
 export async function loadHotspotLayout(): Promise<LoadResult> {
   const cloud = await readFromCloud();
   if (cloud) {
     writeLocalCache(cloud);
+    console.log('[hotspotLayout] using source: cloud');
     return { hotspots: cloud, source: 'cloud' };
   }
+
   const local = readLocalCache();
-  if (local) return { hotspots: local, source: 'local' };
-  return { hotspots: DEFAULT_HOTSPOTS.map((h) => ({ ...h })), source: 'default' };
+  if (local) {
+    console.log('[hotspotLayout] using source: local');
+    return { hotspots: local, source: 'local' };
+  }
+
+  console.log('[hotspotLayout] using source: default');
+  return {
+    hotspots: DEFAULT_HOTSPOTS.map((h) => ({ ...h })),
+    source: 'default',
+  };
 }
 
+/**
+ * Publish designed layout.
+ * Always updates local cache; returns whether cloud write was verified.
+ */
 export async function saveHotspotLayout(
   hotspots: Hotspot[],
   updatedBy?: string
@@ -161,6 +227,7 @@ export async function saveHotspotLayout(
   return { cloudSaved };
 }
 
+/** Reset to code defaults and clear local cache (does not delete cloud row). */
 export function resetHotspotLayoutLocal(): Hotspot[] {
   try {
     localStorage.removeItem(LOCAL_CACHE_KEY);
