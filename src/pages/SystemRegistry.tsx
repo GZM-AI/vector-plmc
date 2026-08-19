@@ -1,7 +1,8 @@
 /**
  * System Registry — TAR™ product structure
  * Overview | Tree (type filter) | Deep-link ?id=
- * Display labels: SoftwareItem → Software, Capability → Integrator
+ * Phase 0: revision + status + attachments
+ * Phase 1: revision history timeline + bump revision (configStore)
  */
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
@@ -23,6 +24,9 @@ import {
   Paperclip,
   FileText,
   Plus,
+  History,
+  ArrowUpCircle,
+  Bookmark,
 } from 'lucide-react';
 import {
   TAR_TREE,
@@ -33,7 +37,14 @@ import {
   ALL_ENTITIES,
 } from '../data/tarSeedData';
 import { documentsForEntity } from '../data/documentsSeed';
-import type { Document } from '../types/plm';
+import type { Document, ReleaseStatus, RevisionRecord } from '../types/plm';
+import {
+  applyOverlay,
+  bumpEntityRevision,
+  getHistoryForEntity,
+  subscribeConfigStore,
+} from '../lib/configStore';
+import { nextRevision } from '../lib/revisionUtils';
 
 type ViewMode = 'overview' | 'tree';
 
@@ -55,7 +66,6 @@ const TYPE_LABEL: Record<EntityType, string> = {
   Capability: 'Integrator',
 };
 
-/** Phase 0 release status styles (Draft | In Review | Released | Obsolete) */
 const STATUS_STYLE: Record<EntityStatus, string> = {
   Draft: 'bg-zinc-700 text-zinc-300',
   'In Review': 'bg-blue-900/60 text-blue-300',
@@ -116,15 +126,16 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   search,
   typeFilter,
 }) => {
+  const display = applyOverlay(node);
   const hasChildren = !!(node.children && node.children.length > 0);
   const isExpanded = expanded.has(node.id);
   const isSelected = selectedId === node.id;
 
   const matchesSearch =
     !search ||
-    node.name.toLowerCase().includes(search.toLowerCase()) ||
-    (node.description || '').toLowerCase().includes(search.toLowerCase()) ||
-    (node.tags || []).some((t) => t.toLowerCase().includes(search.toLowerCase()));
+    display.name.toLowerCase().includes(search.toLowerCase()) ||
+    (display.description || '').toLowerCase().includes(search.toLowerCase()) ||
+    (display.tags || []).some((t) => t.toLowerCase().includes(search.toLowerCase()));
 
   const matchesType = nodeMatchesTypeFilter(node, typeFilter);
 
@@ -164,7 +175,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
             isSelected ? 'text-white font-medium' : 'text-zinc-300 group-hover:text-white'
           }`}
         >
-          {node.name}
+          {display.name}
+        </span>
+        <span className="text-[10px] text-zinc-600 shrink-0 hidden sm:inline">
+          Rev {display.revision}
         </span>
         {node.type === 'Subsystem' && (
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 shrink-0">
@@ -196,9 +210,15 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 interface ComponentCardProps {
   entity: ResourceEntity;
   onSelectRelated?: (id: string) => void;
+  historyTick?: number;
 }
 
-const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }) => {
+const ComponentCard: React.FC<ComponentCardProps> = ({
+  entity: rawEntity,
+  onSelectRelated,
+  historyTick = 0,
+}) => {
+  const entity = applyOverlay(rawEntity);
   const accent =
     entity.type === 'Subsystem'
       ? SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[entity.id] || 'sky'] || 'border-zinc-700'
@@ -208,6 +228,45 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
     () => documentsForEntity(entity.id),
     [entity.id]
   );
+
+  const history: RevisionRecord[] = useMemo(
+    () => getHistoryForEntity(entity.id),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entity.id, entity.revision, historyTick]
+  );
+
+  const [showBump, setShowBump] = useState(false);
+  const [bumpComment, setBumpComment] = useState('');
+  const [bumpStatus, setBumpStatus] = useState<ReleaseStatus>('Draft');
+  const [compareA, setCompareA] = useState<string>('');
+  const [compareB, setCompareB] = useState<string>('');
+
+  const previewNext = nextRevision(entity.revision);
+
+  const handleBump = () => {
+    const result = bumpEntityRevision(entity.id, {
+      comment: bumpComment.trim() || undefined,
+      status: bumpStatus,
+    });
+    if (result) {
+      setBumpComment('');
+      setBumpStatus('Draft');
+      setShowBump(false);
+    }
+  };
+
+  const compareRecords = useMemo(() => {
+    if (!compareA || !compareB) return null;
+    const a = history.find((r) => r.revision === compareA);
+    const b = history.find((r) => r.revision === compareB);
+    return { a, b };
+  }, [history, compareA, compareB]);
+
+  const revOptions = useMemo(() => {
+    const set = new Set(history.map((h) => h.revision));
+    set.add(entity.revision);
+    return Array.from(set);
+  }, [history, entity.revision]);
 
   return (
     <div className={`bg-zinc-900 border ${accent} rounded-3xl p-8 space-y-6`}>
@@ -236,11 +295,69 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
             </div>
           </div>
         </div>
-        <div className="text-xs text-zinc-500 text-right shrink-0">
+        <div className="text-xs text-zinc-500 text-right shrink-0 space-y-2">
           <div>ID: {entity.id}</div>
-          {entity.modifiedBy && <div className="mt-1">By: {entity.modifiedBy}</div>}
+          {entity.modifiedBy && <div>By: {entity.modifiedBy}</div>}
+          <button
+            type="button"
+            onClick={() => setShowBump((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-blue-600/20 border border-blue-700/50 text-blue-300 hover:bg-blue-600/30"
+          >
+            <ArrowUpCircle size={12} />
+            Bump revision
+          </button>
         </div>
       </div>
+
+      {showBump && (
+        <div className="bg-zinc-950 border border-blue-900/40 rounded-2xl p-4 space-y-3">
+          <div className="text-sm text-zinc-300">
+            Current <span className="text-white font-medium">Rev {entity.revision}</span>
+            <span className="text-zinc-500"> → </span>
+            Next <span className="text-blue-300 font-medium">Rev {previewNext}</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1">New status</label>
+              <select
+                value={bumpStatus}
+                onChange={(e) => setBumpStatus(e.target.value as ReleaseStatus)}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="Draft">Draft</option>
+                <option value="In Review">In Review</option>
+                <option value="Released">Released</option>
+                <option value="Obsolete">Obsolete</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1">Comment (optional)</label>
+              <input
+                value={bumpComment}
+                onChange={(e) => setBumpComment(e.target.value)}
+                placeholder="What changed?"
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={handleBump}
+              className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium"
+            >
+              Confirm bump to {previewNext}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowBump(false)}
+              className="px-4 py-2 rounded-xl bg-zinc-800 text-sm text-zinc-300"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {entity.description && (
         <div>
@@ -265,6 +382,126 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
         </div>
       )}
 
+      {/* Phase 1 — Revision history */}
+      <div>
+        <h4 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
+          <History size={14} />
+          Revision history ({history.length})
+        </h4>
+        {history.length === 0 ? (
+          <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
+            No history yet. Use <span className="text-zinc-400">Bump revision</span> to create the
+            first recorded change.
+          </p>
+        ) : (
+          <ul className="space-y-2 relative">
+            {history.map((r, idx) => (
+              <li
+                key={r.id}
+                className="flex gap-3 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3"
+              >
+                <div className="flex flex-col items-center pt-0.5">
+                  <span
+                    className={`w-2 h-2 rounded-full ${
+                      idx === 0 ? 'bg-blue-400' : 'bg-zinc-600'
+                    }`}
+                  />
+                  {idx < history.length - 1 && (
+                    <span className="w-px flex-1 bg-zinc-800 mt-1 min-h-[12px]" />
+                  )}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-medium text-white">Rev {r.revision}</span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLE[r.status]}`}>
+                      {r.status}
+                    </span>
+                    <span className="text-[10px] text-zinc-500">
+                      {new Date(r.changedAt).toLocaleString()}
+                    </span>
+                    {r.changedBy && (
+                      <span className="text-[10px] text-zinc-500">by {r.changedBy}</span>
+                    )}
+                  </div>
+                  {r.comment && (
+                    <p className="text-xs text-zinc-400 mt-1">{r.comment}</p>
+                  )}
+                  {r.changesSummary && (
+                    <p className="text-[11px] text-zinc-600 mt-0.5">{r.changesSummary}</p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {/* Simple compare */}
+        {revOptions.length >= 2 && (
+          <div className="mt-4 bg-zinc-950/80 border border-zinc-800 rounded-2xl p-4">
+            <h5 className="text-xs font-medium text-zinc-400 mb-2">Compare revisions</h5>
+            <div className="flex flex-wrap items-center gap-2 mb-3">
+              <select
+                value={compareA}
+                onChange={(e) => setCompareA(e.target.value)}
+                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs"
+              >
+                <option value="">Rev A…</option>
+                {revOptions.map((r) => (
+                  <option key={`a-${r}`} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+              <span className="text-zinc-600 text-xs">vs</span>
+              <select
+                value={compareB}
+                onChange={(e) => setCompareB(e.target.value)}
+                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs"
+              >
+                <option value="">Rev B…</option>
+                {revOptions.map((r) => (
+                  <option key={`b-${r}`} value={r}>
+                    {r}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {compareRecords && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                <div className="rounded-xl border border-zinc-800 p-3">
+                  <div className="text-zinc-400 mb-1">Rev {compareA}</div>
+                  {compareRecords.a ? (
+                    <>
+                      <div className={STATUS_STYLE[compareRecords.a.status] + ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'}>
+                        {compareRecords.a.status}
+                      </div>
+                      <p className="text-zinc-300">{compareRecords.a.comment || '—'}</p>
+                      <p className="text-zinc-600 mt-1">{compareRecords.a.changesSummary}</p>
+                    </>
+                  ) : (
+                    <p className="text-zinc-600">No history row (current only)</p>
+                  )}
+                </div>
+                <div className="rounded-xl border border-zinc-800 p-3">
+                  <div className="text-zinc-400 mb-1">Rev {compareB}</div>
+                  {compareRecords.b ? (
+                    <>
+                      <div className={STATUS_STYLE[compareRecords.b.status] + ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'}>
+                        {compareRecords.b.status}
+                      </div>
+                      <p className="text-zinc-300">{compareRecords.b.comment || '—'}</p>
+                      <p className="text-zinc-600 mt-1">{compareRecords.b.changesSummary}</p>
+                    </>
+                  ) : (
+                    <p className="text-zinc-600">No history row (current only)</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
       {/* Phase 0 — Attachments */}
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -284,8 +521,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
         </div>
         {linkedDocs.length === 0 ? (
           <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
-            No documents linked yet. Attachments preserve the hierarchy as navigation spine —
-            open any component to see revision + linked docs.
+            No documents linked yet.
           </p>
         ) : (
           <ul className="space-y-2">
@@ -309,15 +545,6 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
                   {d.description && (
                     <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{d.description}</p>
                   )}
-                  <div className="text-[10px] text-zinc-600 mt-1.5 flex flex-wrap gap-3">
-                    {d.fileName && <span>{d.fileName}</span>}
-                    {d.sizeBytes != null && (
-                      <span>{(d.sizeBytes / 1024).toFixed(0)} KB</span>
-                    )}
-                    <span>
-                      Updated {new Date(d.lastModified).toLocaleDateString()}
-                    </span>
-                  </div>
                 </div>
               </li>
             ))}
@@ -331,23 +558,27 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
             Contained Elements ({entity.children.length})
           </h4>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {entity.children.map((child) => (
-              <button
-                key={child.id}
-                onClick={() => onSelectRelated?.(child.id)}
-                className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  {TYPE_ICON[child.type]}
-                  <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
-                    {child.name}
-                  </span>
-                </div>
-                <p className="text-xs text-zinc-500 line-clamp-2">
-                  {child.description || TYPE_LABEL[child.type]}
-                </p>
-              </button>
-            ))}
+            {entity.children.map((child) => {
+              const c = applyOverlay(child);
+              return (
+                <button
+                  key={child.id}
+                  onClick={() => onSelectRelated?.(child.id)}
+                  className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {TYPE_ICON[child.type]}
+                    <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
+                      {c.name}
+                    </span>
+                    <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
+                  </div>
+                  <p className="text-xs text-zinc-500 line-clamp-2">
+                    {c.description || TYPE_LABEL[child.type]}
+                  </p>
+                </button>
+              );
+            })}
           </div>
         </div>
       )}
@@ -357,7 +588,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
           <span>Created: {new Date(entity.createdAt).toLocaleDateString()}</span>
         )}
         {entity.lastModified && (
-          <span>Last modified: {new Date(entity.lastModified).toLocaleDateString()}</span>
+          <span>Last modified: {new Date(entity.lastModified).toLocaleString()}</span>
         )}
         {entity.modifiedBy && <span>By: {entity.modifiedBy}</span>}
       </div>
@@ -368,7 +599,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({ entity, onSelectRelated }
 const SubsystemOverviewCard: React.FC<{
   sub: ResourceEntity;
   onOpen: (id: string) => void;
-}> = ({ sub, onOpen }) => {
+}> = ({ sub: rawSub, onOpen }) => {
+  const sub = applyOverlay(rawSub);
   const accent = SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
   const children = sub.children || [];
   const counts = useMemo(() => {
@@ -413,23 +645,24 @@ const SubsystemOverviewCard: React.FC<{
       </div>
 
       <div className="flex-1 space-y-1.5 min-h-0">
-        {children.map((child) => (
-          <button
-            key={child.id}
-            type="button"
-            onClick={() => onOpen(child.id)}
-            className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
-          >
-            <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
-            <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
-              {child.name}
-            </span>
-            <span className="text-[10px] text-zinc-600 shrink-0 hidden sm:inline">
-              {TYPE_LABEL[child.type]}
-            </span>
-            <ChevronRight size={12} className="text-zinc-600 shrink-0" />
-          </button>
-        ))}
+        {children.map((child) => {
+          const c = applyOverlay(child);
+          return (
+            <button
+              key={child.id}
+              type="button"
+              onClick={() => onOpen(child.id)}
+              className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
+            >
+              <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
+              <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
+                {c.name}
+              </span>
+              <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
+              <ChevronRight size={12} className="text-zinc-600 shrink-0" />
+            </button>
+          );
+        })}
       </div>
     </div>
   );
@@ -442,6 +675,9 @@ const SystemRegistry: React.FC = () => {
   const [expanded, setExpanded] = useState<Set<string>>(new Set([TAR_TREE.id]));
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<EntityType | 'all'>('all');
+  const [historyTick, setHistoryTick] = useState(0);
+
+  useEffect(() => subscribeConfigStore(() => setHistoryTick((t) => t + 1)), []);
 
   useEffect(() => {
     const id = searchParams.get('id');
@@ -474,7 +710,7 @@ const SystemRegistry: React.FC = () => {
   const selected = useMemo(() => {
     if (!selectedId) return null;
     return ALL_ENTITIES.find((e) => e.id === selectedId) || null;
-  }, [selectedId]);
+  }, [selectedId, historyTick]);
 
   const subsystems = useMemo(
     () => (TAR_TREE.children || []).filter((c) => c.type === 'Subsystem'),
@@ -587,6 +823,12 @@ const SystemRegistry: React.FC = () => {
           )}
 
           <Link
+            to="/baselines"
+            className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-blue-500 inline-flex items-center gap-2"
+          >
+            <Bookmark size={14} /> Baselines
+          </Link>
+          <Link
             to="/system-architecture"
             className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-blue-500"
           >
@@ -668,7 +910,11 @@ const SystemRegistry: React.FC = () => {
 
           <div className="xl:col-span-8">
             {selected ? (
-              <ComponentCard entity={selected} onSelectRelated={handleSelectById} />
+              <ComponentCard
+                entity={selected}
+                onSelectRelated={handleSelectById}
+                historyTick={historyTick}
+              />
             ) : (
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-16 text-center">
                 <Eye className="mx-auto text-zinc-600 mb-4" size={40} />
