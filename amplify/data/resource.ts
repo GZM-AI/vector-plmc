@@ -1,10 +1,6 @@
 import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
 const schema = a.schema({
-  /**
-   * Shared System Architecture hotspot layout for all Vector users.
-   * One row per layoutKey (e.g. tar-system-architecture-v1).
-   */
   MapLayout: a
     .model({
       layoutKey: a.string().required(),
@@ -13,9 +9,9 @@ const schema = a.schema({
     })
     .identifier(['layoutKey'])
     .authorization((allow) => [
-      // Interim: authenticated users can read/write shared layout.
-      // Guest/public can be added later if you need fully open read.
-      allow.authenticated().to(['read', 'create', 'update']),
+      // Works without sign-in (current Vector behavior)
+      allow.guest().to(['read', 'create', 'update']),
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
     ]),
 });
 
@@ -24,6 +20,7 @@ export type Schema = ClientSchema<typeof schema>;
 export const data = defineData({
   schema,
   authorizationModes: {
-    defaultAuthorizationMode: 'userPool',
+    // Guest uses IAM unauthenticated identity
+    defaultAuthorizationMode: 'identityPool',
   },
 });
