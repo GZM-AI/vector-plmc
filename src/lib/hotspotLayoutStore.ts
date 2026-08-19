@@ -1,21 +1,8 @@
 /**
- * Shared Hotspot Layout Store
- * ---------------------------
- * Single source of truth for the TAR™ System Architecture zone map.
- *
- * Load order:
- *   1. Amplify Data (when client is available)  → team-wide layout
- *   2. localStorage cache                       → last known good / offline
- *   3. DEFAULT_HOTSPOTS                         → bootstrap for brand-new env
- *
- * Save:
- *   - Dragging only updates React state (draft).
- *   - Explicit "Save layout" publishes to cloud + refreshes local cache.
- *   - localStorage is still written as a fast offline cache, never as the
- *     system of record once Amplify is live.
- *
- * Until Amplify Data model is deployed, the Amplify branch is a no-op and
- * the store behaves like the old localStorage path (with clearer save semantics).
+ * Shared Hotspot Layout Store — aligned to amplify MapLayout model
+ * layoutKey: "tar-system-architecture-v1"
+ * Load: cloud → local cache → DEFAULT_HOTSPOTS
+ * Save: explicit publish (Save layout button)
  */
 
 export type Hotspot = {
@@ -28,8 +15,6 @@ export type Hotspot = {
   color: string;
 };
 
-/** Canonical bootstrap — also the Reset target. Update this in source when you
- *  want a new baseline layout without requiring a cloud write. */
 export const DEFAULT_HOTSPOTS: Hotspot[] = [
   { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
   { id: 'sub-optical', label: 'Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
@@ -46,7 +31,6 @@ export const DEFAULT_HOTSPOTS: Hotspot[] = [
 ];
 
 const LOCAL_CACHE_KEY = 'vector-tar-hotspots-v3';
-/** Stable id for the single shared layout record in Amplify Data */
 export const LAYOUT_RECORD_KEY = 'tar-system-architecture-v1';
 
 function mergeWithDefaults(partial: Partial<Hotspot>[]): Hotspot[] {
@@ -78,32 +62,25 @@ function writeLocalCache(hotspots: Hotspot[]): void {
   try {
     localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(hotspots));
   } catch {
-    /* quota / private mode — ignore */
+    /* ignore */
   }
 }
 
-/**
- * Optional Amplify client injection.
- * When Amplify Data is ready, call configureHotspotAmplify(client) once at app boot.
- * The client is expected to expose:
- *   models.HotspotLayout.get({ id })
- *   models.HotspotLayout.update({ id, zonesJson, updatedAt, updatedBy })
- *   models.HotspotLayout.create({ id, zonesJson, updatedAt, updatedBy })
- */
+/** Amplify Gen 2 client shape for MapLayout */
 type AmplifyLikeClient = {
   models: {
-    HotspotLayout: {
-      get: (args: { id: string }) => Promise<{ data?: { zonesJson?: string } | null }>;
+    MapLayout: {
+      get: (args: {
+        layoutKey: string;
+      }) => Promise<{ data?: { hotspotsJson?: string; layoutKey?: string } | null }>;
       update: (args: {
-        id: string;
-        zonesJson: string;
-        updatedAt?: string;
+        layoutKey: string;
+        hotspotsJson: string;
         updatedBy?: string;
       }) => Promise<unknown>;
       create: (args: {
-        id: string;
-        zonesJson: string;
-        updatedAt?: string;
+        layoutKey: string;
+        hotspotsJson: string;
         updatedBy?: string;
       }) => Promise<unknown>;
     };
@@ -119,8 +96,10 @@ export function configureHotspotAmplify(client: AmplifyLikeClient | null): void 
 async function readFromCloud(): Promise<Hotspot[] | null> {
   if (!amplifyClient) return null;
   try {
-    const result = await amplifyClient.models.HotspotLayout.get({ id: LAYOUT_RECORD_KEY });
-    const json = result?.data?.zonesJson;
+    const result = await amplifyClient.models.MapLayout.get({
+      layoutKey: LAYOUT_RECORD_KEY,
+    });
+    const json = result?.data?.hotspotsJson;
     if (!json) return null;
     const parsed = JSON.parse(json) as Hotspot[];
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
@@ -133,17 +112,15 @@ async function readFromCloud(): Promise<Hotspot[] | null> {
 async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<boolean> {
   if (!amplifyClient) return false;
   const payload = {
-    id: LAYOUT_RECORD_KEY,
-    zonesJson: JSON.stringify(hotspots),
-    updatedAt: new Date().toISOString(),
+    layoutKey: LAYOUT_RECORD_KEY,
+    hotspotsJson: JSON.stringify(hotspots),
     updatedBy: updatedBy || 'unknown',
   };
   try {
-    // Try update first; if record does not exist, create.
     try {
-      await amplifyClient.models.HotspotLayout.update(payload);
+      await amplifyClient.models.MapLayout.update(payload);
     } catch {
-      await amplifyClient.models.HotspotLayout.create(payload);
+      await amplifyClient.models.MapLayout.create(payload);
     }
     return true;
   } catch {
@@ -156,11 +133,10 @@ export type LoadResult = {
   source: 'cloud' | 'local' | 'default';
 };
 
-/** Load the team layout. Prefer cloud → local cache → defaults. */
 export async function loadHotspotLayout(): Promise<LoadResult> {
   const cloud = await readFromCloud();
   if (cloud) {
-    writeLocalCache(cloud); // keep offline cache fresh
+    writeLocalCache(cloud);
     return { hotspots: cloud, source: 'cloud' };
   }
   const local = readLocalCache();
@@ -168,11 +144,6 @@ export async function loadHotspotLayout(): Promise<LoadResult> {
   return { hotspots: DEFAULT_HOTSPOTS.map((h) => ({ ...h })), source: 'default' };
 }
 
-/**
- * Publish the designed layout.
- * Writes to cloud (when available) and always refreshes the local cache.
- * Returns whether the cloud write succeeded.
- */
 export async function saveHotspotLayout(
   hotspots: Hotspot[],
   updatedBy?: string
@@ -182,9 +153,6 @@ export async function saveHotspotLayout(
   return { cloudSaved };
 }
 
-/** Reset to the code-level DEFAULT_HOTSPOTS and clear local cache.
- *  Does not automatically delete the cloud record — call save after reset
- *  if you want the team layout to become the defaults again. */
 export function resetHotspotLayoutLocal(): Hotspot[] {
   try {
     localStorage.removeItem(LOCAL_CACHE_KEY);
