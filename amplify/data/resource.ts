@@ -9,8 +9,7 @@ const schema = a.schema({
     })
     .identifier(['layoutKey'])
     .authorization((allow) => [
-      // Works without sign-in (current Vector behavior)
-      allow.guest().to(['read', 'create', 'update']),
+      allow.publicApiKey().to(['read', 'create', 'update']),
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
     ]),
 });
@@ -20,7 +19,9 @@ export type Schema = ClientSchema<typeof schema>;
 export const data = defineData({
   schema,
   authorizationModes: {
-    // Guest uses IAM unauthenticated identity
-    defaultAuthorizationMode: 'identityPool',
+    defaultAuthorizationMode: 'apiKey',
+    apiKeyAuthorizationMode: {
+      expiresInDays: 365,
+    },
   },
 });
