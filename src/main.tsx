@@ -14,7 +14,18 @@ async function boot() {
     if (!res.ok) throw new Error(`amplify_outputs.json HTTP ${res.status}`)
     const outputs = await res.json()
     Amplify.configure(outputs)
-    const client = generateClient<Schema>()
+
+    // Prefer IAM/guest when the backend allows it (identityPool).
+    // Falls back to default (userPool) if identityPool is not accepted.
+    let client
+    try {
+      client = generateClient<Schema>({ authMode: 'identityPool' })
+      console.log('PLM Console — Data client authMode: identityPool')
+    } catch {
+      client = generateClient<Schema>()
+      console.log('PLM Console — Data client authMode: default')
+    }
+
     configureHotspotAmplify(client as any)
     console.log('PLM Console starting — Amplify Data client configured (MapLayout)')
   } catch (err) {

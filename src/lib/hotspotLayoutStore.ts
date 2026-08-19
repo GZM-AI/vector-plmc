@@ -110,7 +110,10 @@ async function readFromCloud(): Promise<Hotspot[] | null> {
 }
 
 async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<boolean> {
-  if (!amplifyClient) return false;
+  if (!amplifyClient) {
+    console.warn('[hotspotLayout] no Amplify client — configureHotspotAmplify was not called');
+    return false;
+  }
   const payload = {
     layoutKey: LAYOUT_RECORD_KEY,
     hotspotsJson: JSON.stringify(hotspots),
@@ -119,11 +122,16 @@ async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<bo
   try {
     try {
       await amplifyClient.models.MapLayout.update(payload);
-    } catch {
+      console.log('[hotspotLayout] cloud UPDATE ok');
+      return true;
+    } catch (updateErr) {
+      console.warn('[hotspotLayout] UPDATE failed, trying CREATE', updateErr);
       await amplifyClient.models.MapLayout.create(payload);
+      console.log('[hotspotLayout] cloud CREATE ok');
+      return true;
     }
-    return true;
-  } catch {
+  } catch (err) {
+    console.error('[hotspotLayout] cloud write failed', err);
     return false;
   }
 }
