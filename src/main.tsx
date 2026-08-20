@@ -7,10 +7,12 @@ import App from './App.tsx'
 import { configureHotspotAmplify } from './lib/hotspotLayoutStore'
 import { configureProductAmplify } from './lib/productAmplify'
 import { hydrateConfigStoreFromCloud } from './lib/configStore'
+import { ensurePlanningHydrated } from './lib/planningStore'
 import type { Schema } from '../amplify/data/resource'
 
 async function boot() {
   try {
+    // Loaded at runtime from /public so Vite build does not need the file in git at compile time
     const res = await fetch('/amplify_outputs.json')
     if (!res.ok) throw new Error(`amplify_outputs.json HTTP ${res.status}`)
     const outputs = await res.json()
@@ -19,13 +21,16 @@ async function boot() {
     const client = generateClient<Schema>({ authMode: 'apiKey' })
     configureHotspotAmplify(client as any)
     configureProductAmplify(client)
-    console.log('PLM Console — Data client authMode: apiKey (MapLayout + Registry spine)')
+    console.log(
+      'PLM Console — Data client authMode: apiKey (MapLayout + Registry spine + PlanLine)'
+    )
 
-    // Pull shared Registry data before UI relies on it
+    // Shared Registry data, then Planning cost lines
     await hydrateConfigStoreFromCloud()
+    await ensurePlanningHydrated()
   } catch (err) {
     console.warn(
-      'PLM Console — Amplify not fully configured; Registry will use local cache only.',
+      'PLM Console — Amplify not fully configured; app will use local cache only.',
       err
     )
   }

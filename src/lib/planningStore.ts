@@ -1,9 +1,8 @@
 /**
- * Planning & Cost store
- * Per-entity schedule + cost lines keyed by Registry entityId.
- * localStorage until Amplify product store is wired.
+ * Planning & Cost — cloud-first (Amplify PlanLine) + local cache
  */
 import type { ResourceEntity } from '../types/plm';
+import { getProductClient } from './productAmplify';
 
 export type CostConfidence = 'Rough' | 'Budget' | 'Firm';
 export type PlanStatus = 'Not started' | 'In progress' | 'Complete' | 'Blocked';
@@ -17,23 +16,19 @@ export type PlanLine = {
   confidence: CostConfidence;
   note: string;
   status: PlanStatus;
-  /** ISO date YYYY-MM-DD */
   startDate: string;
-  /** ISO date YYYY-MM-DD */
   endDate: string;
 };
 
 const STORAGE_KEY = 'vector-plm-planning-v1';
 
-type StoreState = {
-  lines: Record<string, PlanLine>;
-};
+type StoreState = { lines: Record<string, PlanLine> };
 
 function emptyState(): StoreState {
   return { lines: {} };
 }
 
-function load(): StoreState {
+function loadLocal(): StoreState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return emptyState();
@@ -44,7 +39,7 @@ function load(): StoreState {
   }
 }
 
-function save(state: StoreState): void {
+function saveLocal(state: StoreState): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   } catch {
@@ -52,11 +47,16 @@ function save(state: StoreState): void {
   }
 }
 
-let state: StoreState = load();
+let state: StoreState = loadLocal();
 const listeners = new Set<() => void>();
+let hydratePromise: Promise<void> | null = null;
 
 function notify() {
   listeners.forEach((fn) => fn());
+}
+
+function hasErrors(result: { errors?: unknown[] } | null | undefined): boolean {
+  return Array.isArray(result?.errors) && result!.errors!.length > 0;
 }
 
 export function subscribePlanningStore(fn: () => void): () => void {
@@ -87,6 +87,83 @@ export function getAllPlanLines(): Record<string, PlanLine> {
   return { ...state.lines };
 }
 
+async function upsertPlanLineCloud(line: PlanLine): Promise<boolean> {
+  const client = getProductClient();
+  if (!client?.models?.PlanLine) {
+    console.warn('[planningStore] no PlanLine model / client');
+    return false;
+  }
+  const payload = {
+    entityId: line.entityId,
+    nre: line.nre,
+    unitCost: line.unitCost,
+    qty: line.qty,
+    leadTimeDays: line.leadTimeDays,
+    confidence: line.confidence,
+    note: line.note || '',
+    status: line.status,
+    startDate: line.startDate || '',
+    endDate: line.endDate || '',
+  };
+  try {
+    let result = await client.models.PlanLine.update(payload);
+    if (hasErrors(result) || !result?.data) {
+      result = await client.models.PlanLine.create(payload);
+    }
+    if (hasErrors(result) || !result?.data) {
+      console.error('[planningStore] cloud write failed', result?.errors || result);
+      return false;
+    }
+    console.log('[planningStore] plan line cloud ok', line.entityId);
+    return true;
+  } catch (err) {
+    console.error('[planningStore] cloud error', err);
+    return false;
+  }
+}
+
+export async function hydratePlanningFromCloud(): Promise<void> {
+  const client = getProductClient();
+  if (!client?.models?.PlanLine) {
+    console.warn('[planningStore] hydrate skipped — no client');
+    return;
+  }
+  try {
+    const result = await client.models.PlanLine.list({ limit: 2000 });
+    if (hasErrors(result)) {
+      console.error('[planningStore] list errors', result.errors);
+      return;
+    }
+    const lines: Record<string, PlanLine> = {};
+    for (const row of result?.data || []) {
+      if (!row?.entityId) continue;
+      lines[row.entityId] = {
+        entityId: row.entityId,
+        nre: Number(row.nre) || 0,
+        unitCost: Number(row.unitCost) || 0,
+        qty: Number(row.qty) || 0,
+        leadTimeDays: Number(row.leadTimeDays) || 0,
+        confidence: (row.confidence as CostConfidence) || 'Rough',
+        note: row.note || '',
+        status: (row.status as PlanStatus) || 'Not started',
+        startDate: row.startDate || '',
+        endDate: row.endDate || '',
+      };
+    }
+    state = { lines };
+    saveLocal(state);
+    console.log('[planningStore] hydrated from cloud', Object.keys(lines).length, 'lines');
+    notify();
+  } catch (err) {
+    console.error('[planningStore] hydrate failed', err);
+  }
+}
+
+export function ensurePlanningHydrated(): Promise<void> {
+  if (!hydratePromise) hydratePromise = hydratePlanningFromCloud();
+  return hydratePromise;
+}
+
 export function upsertPlanLine(
   entityId: string,
   patch: Partial<Omit<PlanLine, 'entityId'>>
@@ -103,14 +180,10 @@ export function upsertPlanLine(
       ? Math.max(0, Number(patch.leadTimeDays))
       : prev.leadTimeDays,
   };
-  state = {
-    lines: {
-      ...state.lines,
-      [entityId]: next,
-    },
-  };
-  save(state);
+  state = { lines: { ...state.lines, [entityId]: next } };
+  saveLocal(state);
   notify();
+  void upsertPlanLineCloud(next);
   return next;
 }
 
@@ -137,25 +210,6 @@ export function sumLines(lines: PlanLine[]): {
   return { nre, unit, total, missingCost };
 }
 
-/** Leaf entities under a node (no further children), for cost entry */
-export function collectLeafEntities(node: ResourceEntity): ResourceEntity[] {
-  const children = node.children || [];
-  if (children.length === 0) {
-    // node itself may be a leaf component under a subsystem
-    return node.type !== 'System' && node.type !== 'Subsystem' ? [node] : [];
-  }
-  const out: ResourceEntity[] = [];
-  for (const c of children) {
-    if (c.children && c.children.length > 0) {
-      out.push(...collectLeafEntities(c));
-    } else {
-      out.push(c);
-    }
-  }
-  return out;
-}
-
-/** All costable entities under a subsystem (direct + nested leaves) */
 export function collectCostableUnder(node: ResourceEntity): ResourceEntity[] {
   const children = node.children || [];
   if (children.length === 0) return [];
@@ -183,6 +237,6 @@ export function formatMoney(n: number): string {
 
 export function resetPlanningStore(): void {
   state = emptyState();
-  save(state);
+  saveLocal(state);
   notify();
 }

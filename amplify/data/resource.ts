@@ -2,8 +2,8 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
 /**
  * Vector PLM — Amplify Data
- * MapLayout (zones) + Registry spine (overlays, extra entities, revisions, baselines)
- * API key auth for small trusted team (same as shared zone map).
+ * MapLayout (zones) + Registry spine + PlanLine (Planning & Cost)
+ * API key auth for small trusted team.
  */
 const schema = a.schema({
   MapLayout: a
@@ -86,6 +86,26 @@ const schema = a.schema({
       createdAt: a.string().required(),
     })
     .identifier(['id'])
+    .authorization((allow) => [
+      allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
+    ]),
+
+  /** Planning & Cost line per Registry entityId */
+  PlanLine: a
+    .model({
+      entityId: a.string().required(),
+      nre: a.float().required(),
+      unitCost: a.float().required(),
+      qty: a.float().required(),
+      leadTimeDays: a.float().required(),
+      confidence: a.string().required(),
+      note: a.string(),
+      status: a.string().required(),
+      startDate: a.string(),
+      endDate: a.string(),
+    })
+    .identifier(['entityId'])
     .authorization((allow) => [
       allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
