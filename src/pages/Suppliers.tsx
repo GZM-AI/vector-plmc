@@ -1,6 +1,6 @@
 /**
  * Suppliers — vendors, manufacturers, integrators
- * Link Registry parts on New/Edit form and on detail view.
+ * New/Edit: pick Subsystem first, then elements under it.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -30,23 +30,39 @@ import {
   type MakeBuy,
 } from '../lib/suppliersStore';
 
-function useEntityIndex(): { byId: Map<string, ResourceEntity>; list: ResourceEntity[] } {
+function useProductData(): {
+  byId: Map<string, ResourceEntity>;
+  list: ResourceEntity[];
+  subsystems: ResourceEntity[];
+} {
   const [list, setList] = useState<ResourceEntity[]>([]);
+  const [subsystems, setSubsystems] = useState<ResourceEntity[]>([]);
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
     (async () => {
       try {
         const mod = await import('../lib/configStore');
-        const load = () => setList(mod.getMergedAllEntities());
+        const load = () => {
+          const tree = mod.getRegistryTree();
+          setList(mod.getMergedAllEntities());
+          setSubsystems(
+            (tree.children || []).filter((c: ResourceEntity) => c.type === 'Subsystem')
+          );
+        };
         load();
         unsub = mod.subscribeConfigStore(load);
       } catch {
         try {
           const seed = await import('../data/tarSeedData');
           setList(seed.ALL_ENTITIES || []);
+          const tree = seed.TAR_TREE;
+          setSubsystems(
+            (tree?.children || []).filter((c: ResourceEntity) => c.type === 'Subsystem')
+          );
         } catch {
           setList([]);
+          setSubsystems([]);
         }
       }
     })();
@@ -54,7 +70,7 @@ function useEntityIndex(): { byId: Map<string, ResourceEntity>; list: ResourceEn
   }, []);
 
   const byId = useMemo(() => new Map(list.map((e) => [e.id, e])), [list]);
-  return { byId, list };
+  return { byId, list, subsystems };
 }
 
 const KIND_OPTIONS: SupplierKind[] = [
@@ -97,6 +113,19 @@ const emptyForm = (): Partial<Supplier> & { name: string } => ({
   entityIds: [],
 });
 
+/** Flatten all descendants under a subsystem for the element checklist */
+function elementsUnderSubsystem(sub: ResourceEntity): ResourceEntity[] {
+  const out: ResourceEntity[] = [];
+  const walk = (n: ResourceEntity) => {
+    for (const c of n.children || []) {
+      out.push(c);
+      if (c.children && c.children.length > 0) walk(c);
+    }
+  };
+  walk(sub);
+  return out;
+}
+
 const Suppliers: React.FC = () => {
   const [tick, setTick] = useState(0);
   const [search, setSearch] = useState('');
@@ -104,7 +133,9 @@ const Suppliers: React.FC = () => {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [linkEntityId, setLinkEntityId] = useState('');
-  const { byId, list: entities } = useEntityIndex();
+  /** Subsystem chosen on New/Edit form to show its elements */
+  const [formSubsystemId, setFormSubsystemId] = useState('');
+  const { byId, list: entities, subsystems } = useProductData();
 
   useEffect(() => subscribeSuppliersStore(() => setTick((t) => t + 1)), []);
 
@@ -123,6 +154,16 @@ const Suppliers: React.FC = () => {
         (s.notes || '').toLowerCase().includes(q)
     );
   }, [suppliers, search]);
+
+  const formSubsystem = useMemo(
+    () => subsystems.find((s) => s.id === formSubsystemId) || null,
+    [subsystems, formSubsystemId]
+  );
+
+  const formElements = useMemo(() => {
+    if (!formSubsystem) return [] as ResourceEntity[];
+    return elementsUnderSubsystem(formSubsystem);
+  }, [formSubsystem]);
 
   const partOptions = useMemo(() => {
     return entities
@@ -146,12 +187,14 @@ const Suppliers: React.FC = () => {
   const startCreate = () => {
     setSelectedId(null);
     setForm(emptyForm());
+    setFormSubsystemId('');
     setEditing(true);
   };
 
   const startEdit = (s: Supplier) => {
     setSelectedId(s.id);
     setForm({ ...s, entityIds: [...(s.entityIds || [])] });
+    setFormSubsystemId('');
     setEditing(true);
   };
 
@@ -166,6 +209,7 @@ const Suppliers: React.FC = () => {
     setSelectedId(saved.id);
     setForm({ ...saved, entityIds: [...(saved.entityIds || [])] });
     setEditing(false);
+    setFormSubsystemId('');
   };
 
   const handleDelete = () => {
@@ -175,6 +219,7 @@ const Suppliers: React.FC = () => {
     setSelectedId(null);
     setEditing(false);
     setForm(emptyForm());
+    setFormSubsystemId('');
   };
 
   const handleLink = () => {
@@ -182,52 +227,6 @@ const Suppliers: React.FC = () => {
     linkSupplierToEntity(selectedId, linkEntityId);
     setLinkEntityId('');
   };
-
-  const partsChecklist = (
-    <div className="sm:col-span-2">
-      <label className="text-[11px] text-zinc-500 block mb-2">
-        Registry parts this supplier addresses
-      </label>
-      <p className="text-[11px] text-zinc-600 mb-2">
-        Select components / software / interfaces. Parent subsystem is shown under each name.
-      </p>
-      <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
-        {partOptions.length === 0 ? (
-          <p className="p-3 text-xs text-zinc-600">No parts in Registry yet.</p>
-        ) : (
-          partOptions.map((e) => {
-            const parent = e.parentId ? byId.get(e.parentId) : undefined;
-            const checked = (form.entityIds || []).includes(e.id);
-            return (
-              <label
-                key={e.id}
-                className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
-              >
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={() => toggleFormEntity(e.id)}
-                  className="mt-1"
-                />
-                <span className="min-w-0">
-                  <span className="text-sm text-zinc-200 block truncate">{e.name}</span>
-                  <span className="text-[10px] text-zinc-600">
-                    {e.type}
-                    {parent ? ` · ${parent.name}` : ''}
-                  </span>
-                </span>
-              </label>
-            );
-          })
-        )}
-      </div>
-      {(form.entityIds?.length || 0) > 0 && (
-        <p className="text-[11px] text-zinc-500 mt-2">
-          {form.entityIds!.length} part{form.entityIds!.length === 1 ? '' : 's'} selected
-        </p>
-      )}
-    </div>
-  );
 
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto min-h-screen text-white">
@@ -276,6 +275,7 @@ const Suppliers: React.FC = () => {
                     setSelectedId(s.id);
                     setForm({ ...s, entityIds: [...(s.entityIds || [])] });
                     setEditing(false);
+                    setFormSubsystemId('');
                   }}
                   className={
                     'w-full text-left px-4 py-3 hover:bg-zinc-800/80 transition ' +
@@ -343,8 +343,10 @@ const Suppliers: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setEditing(false);
-                          if (selected) setForm({ ...selected, entityIds: [...selected.entityIds] });
+                          if (selected)
+                            setForm({ ...selected, entityIds: [...selected.entityIds] });
                           else setForm(emptyForm());
+                          setFormSubsystemId('');
                         }}
                         className="px-3 py-1.5 rounded-xl text-xs bg-zinc-800 text-zinc-300"
                       >
@@ -467,7 +469,78 @@ const Suppliers: React.FC = () => {
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y"
                     />
                   </div>
-                  {partsChecklist}
+
+                  {/* Subsystem → then elements */}
+                  <div className="sm:col-span-2 space-y-3 pt-2 border-t border-zinc-800">
+                    <div>
+                      <label className="text-[11px] text-zinc-500 block mb-1">Subsystem</label>
+                      <select
+                        value={formSubsystemId}
+                        onChange={(e) => setFormSubsystemId(e.target.value)}
+                        className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">Select a subsystem…</option>
+                        {subsystems.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-[11px] text-zinc-600 mt-1">
+                        Same subsystem list as System Registry. After you pick one, choose which
+                        elements this supplier addresses.
+                      </p>
+                    </div>
+
+                    {formSubsystemId && (
+                      <div>
+                        <label className="text-[11px] text-zinc-500 block mb-2">
+                          Elements within {formSubsystem?.name || 'subsystem'}
+                        </label>
+                        <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
+                          {formElements.length === 0 ? (
+                            <p className="p-3 text-xs text-zinc-600">
+                              No elements under this subsystem yet. Add children in System
+                              Registry first.
+                            </p>
+                          ) : (
+                            formElements.map((e) => {
+                              const checked = (form.entityIds || []).includes(e.id);
+                              return (
+                                <label
+                                  key={e.id}
+                                  className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() => toggleFormEntity(e.id)}
+                                    className="mt-1"
+                                  />
+                                  <span className="min-w-0">
+                                    <span className="text-sm text-zinc-200 block truncate">
+                                      {e.name}
+                                    </span>
+                                    <span className="text-[10px] text-zinc-600">{e.type}</span>
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {(form.entityIds?.length || 0) > 0 && (
+                      <p className="text-[11px] text-zinc-500">
+                        {form.entityIds!.length} element
+                        {form.entityIds!.length === 1 ? '' : 's'} selected total
+                        {formSubsystemId
+                          ? ' (switch subsystem above to add from another branch)'
+                          : ''}
+                      </p>
+                    )}
+                  </div>
                 </div>
               ) : (
                 selected && (
@@ -528,7 +601,7 @@ const Suppliers: React.FC = () => {
 
                   {selected.entityIds.length === 0 ? (
                     <p className="text-xs text-zinc-600">
-                      No parts linked. Use Edit to select parts, or link one below.
+                      No parts linked. Use Edit → Subsystem → elements, or link one below.
                     </p>
                   ) : (
                     <ul className="space-y-2">
@@ -619,11 +692,6 @@ const Suppliers: React.FC = () => {
           )}
         </div>
       </div>
-
-      <p className="text-xs text-zinc-600 mt-6">
-        Stored on this browser until the product store moves to Amplify. Parts checklist on New/Edit
-        saves entity links with the supplier.
-      </p>
     </div>
   );
 };
