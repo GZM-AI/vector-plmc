@@ -1,385 +1,570 @@
 /**
- * Suppliers — master directory skeleton
- * Links to Registry entities come next (supplier ↔ subsystem / component)
+ * Suppliers — vendors, manufacturers, integrators
+ * Link to System Registry entities; make-vs-buy + engagement + risk.
  */
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Factory,
-  Box,
-  Crosshair,
+  Plus,
   Search,
+  ExternalLink,
+  Trash2,
+  Link2,
   Building2,
-  Globe,
-  ChevronRight,
-  X,
 } from 'lucide-react';
-import { TAR_TREE } from '../data/tarSeedData';
+import type { ResourceEntity } from '../types/plm';
+import {
+  getSuppliers,
+  upsertSupplier,
+  deleteSupplier,
+  linkSupplierToEntity,
+  unlinkSupplierFromEntity,
+  getEntitySourcing,
+  setEntitySourcing,
+  subscribeSuppliersStore,
+  type Supplier,
+  type SupplierKind,
+  type EngagementStatus,
+  type SourcingRisk,
+  type MakeBuy,
+} from '../lib/suppliersStore';
 
-type SupplierStatus = 'prospect' | 'engaged' | 'qualified' | 'preferred' | 'do-not-use';
-type SupplierKind = 'OEM' | 'Contract mfr' | 'Distributor' | 'Design house' | 'Other';
+function useEntityIndex(): { byId: Map<string, ResourceEntity>; list: ResourceEntity[] } {
+  const [list, setList] = useState<ResourceEntity[]>([]);
 
-type Supplier = {
-  id: string;
-  name: string;
-  kind: SupplierKind;
-  status: SupplierStatus;
-  country?: string;
-  website?: string;
-  domains: string[];
-  /** Registry entity ids this supplier is linked to (empty in skeleton) */
-  linkedEntityIds: string[];
-  notes?: string;
-};
-
-const STATUS_STYLE: Record<SupplierStatus, string> = {
-  prospect: 'bg-zinc-700 text-zinc-300',
-  engaged: 'bg-blue-900/60 text-blue-300',
-  qualified: 'bg-emerald-900/60 text-emerald-300',
-  preferred: 'bg-green-900/60 text-green-300',
-  'do-not-use': 'bg-red-900/60 text-red-300',
-};
-
-/** Placeholder directory — replace / extend when wiring real data */
-const SEED_SUPPLIERS: Supplier[] = [
-  {
-    id: 'sup-example-optics',
-    name: 'Example Optics Co.',
-    kind: 'OEM',
-    status: 'prospect',
-    country: 'US',
-    website: 'https://example.com',
-    domains: ['optics', 'sensors'],
-    linkedEntityIds: [],
-    notes: 'Placeholder — link to Optical / Machine Vision when ready.',
-  },
-  {
-    id: 'sup-example-actuation',
-    name: 'Example Actuation Labs',
-    kind: 'Design house',
-    status: 'prospect',
-    country: 'US',
-    domains: ['actuation', 'mechanical'],
-    linkedEntityIds: [],
-    notes: 'Placeholder — candidate for Barrel Actuation vertical integration.',
-  },
-  {
-    id: 'sup-example-power',
-    name: 'Example Power Systems',
-    kind: 'OEM',
-    status: 'prospect',
-    country: 'US',
-    domains: ['power', 'electronics'],
-    linkedEntityIds: [],
-  },
-];
-
-const Suppliers: React.FC = () => {
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<SupplierStatus | 'all'>('all');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const subsystems = useMemo(
-    () => (TAR_TREE.children || []).filter((c) => c.type === 'Subsystem'),
-    []
-  );
-
-  const filtered = useMemo(() => {
-    return SEED_SUPPLIERS.filter((s) => {
-      if (statusFilter !== 'all' && s.status !== statusFilter) return false;
-      if (!search.trim()) return true;
-      const q = search.toLowerCase();
-      return (
-        s.name.toLowerCase().includes(q) ||
-        s.kind.toLowerCase().includes(q) ||
-        s.domains.some((d) => d.includes(q)) ||
-        (s.country || '').toLowerCase().includes(q)
-      );
-    });
-  }, [search, statusFilter]);
-
-  const selected = SEED_SUPPLIERS.find((s) => s.id === selectedId) || null;
-
-  const counts = useMemo(() => {
-    const byStatus: Record<string, number> = {};
-    SEED_SUPPLIERS.forEach((s) => {
-      byStatus[s.status] = (byStatus[s.status] || 0) + 1;
-    });
-    return byStatus;
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    (async () => {
+      try {
+        const mod = await import('../lib/configStore');
+        const load = () => setList(mod.getMergedAllEntities());
+        load();
+        unsub = mod.subscribeConfigStore(load);
+      } catch {
+        try {
+          const seed = await import('../data/tarSeedData');
+          setList(seed.ALL_ENTITIES || []);
+        } catch {
+          setList([]);
+        }
+      }
+    })();
+    return () => unsub?.();
   }, []);
 
+  const byId = useMemo(() => new Map(list.map((e) => [e.id, e])), [list]);
+  return { byId, list };
+}
+
+const KIND_OPTIONS: SupplierKind[] = [
+  'Vendor',
+  'Manufacturer',
+  'Integrator',
+  'Distributor',
+  'Other',
+];
+const ENGAGEMENT_OPTIONS: EngagementStatus[] = [
+  'Identified',
+  'Contacted',
+  'NDA',
+  'Quoting',
+  'Selected',
+  'Active',
+  'On hold',
+  'Dropped',
+];
+const RISK_OPTIONS: SourcingRisk[] = ['Unknown', 'Low', 'Medium', 'High'];
+const MAKE_BUY_OPTIONS: MakeBuy[] = ['Undecided', 'Buy', 'Make', 'Make-or-buy'];
+
+const RISK_STYLE: Record<SourcingRisk, string> = {
+  Unknown: 'bg-zinc-800 text-zinc-400',
+  Low: 'bg-emerald-950/50 text-emerald-300',
+  Medium: 'bg-amber-950/50 text-amber-300',
+  High: 'bg-red-950/50 text-red-300',
+};
+
+const emptyForm = (): Partial<Supplier> & { name: string } => ({
+  name: '',
+  kind: 'Vendor',
+  engagement: 'Identified',
+  risk: 'Unknown',
+  website: '',
+  contactName: '',
+  contactEmail: '',
+  location: '',
+  notes: '',
+  entityIds: [],
+});
+
+const Suppliers: React.FC = () => {
+  const [tick, setTick] = useState(0);
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [form, setForm] = useState(emptyForm());
+  const [linkEntityId, setLinkEntityId] = useState('');
+  const { byId, list: entities } = useEntityIndex();
+
+  useEffect(() => subscribeSuppliersStore(() => setTick((t) => t + 1)), []);
+
+  const suppliers = useMemo(() => getSuppliers(), [tick]);
+  const selected = selectedId ? suppliers.find((s) => s.id === selectedId) : null;
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return suppliers;
+    return suppliers.filter(
+      (s) =>
+        s.name.toLowerCase().includes(q) ||
+        s.kind.toLowerCase().includes(q) ||
+        s.engagement.toLowerCase().includes(q) ||
+        (s.location || '').toLowerCase().includes(q) ||
+        (s.notes || '').toLowerCase().includes(q)
+    );
+  }, [suppliers, search]);
+
+  const startCreate = () => {
+    setSelectedId(null);
+    setForm(emptyForm());
+    setEditing(true);
+  };
+
+  const startEdit = (s: Supplier) => {
+    setSelectedId(s.id);
+    setForm({ ...s });
+    setEditing(true);
+  };
+
+  const handleSave = () => {
+    if (!form.name.trim()) return;
+    const saved = upsertSupplier({
+      ...form,
+      id: selectedId || undefined,
+      name: form.name,
+    });
+    setSelectedId(saved.id);
+    setForm({ ...saved });
+    setEditing(false);
+  };
+
+  const handleDelete = () => {
+    if (!selectedId) return;
+    if (!confirm('Remove this supplier?')) return;
+    deleteSupplier(selectedId);
+    setSelectedId(null);
+    setEditing(false);
+    setForm(emptyForm());
+  };
+
+  const handleLink = () => {
+    if (!selectedId || !linkEntityId) return;
+    linkSupplierToEntity(selectedId, linkEntityId);
+    setLinkEntityId('');
+  };
+
+  const partOptions = useMemo(() => {
+    return entities
+      .filter((e) => e.type !== 'System' && e.type !== 'Subsystem')
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [entities]);
+
   return (
-    <div className="p-8 max-w-[1600px] mx-auto bg-zinc-950 text-white min-h-screen">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-8">
+    <div className="p-6 lg:p-8 max-w-[1600px] mx-auto min-h-screen text-white">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-4xl font-bold flex items-center gap-3">
+          <h1 className="text-3xl lg:text-4xl font-bold flex items-center gap-3">
             <Factory className="text-blue-400" /> Suppliers
           </h1>
-          <p className="text-zinc-400 mt-2">
-            Master directory · link to subsystems via Vertical Integrators
+          <p className="text-zinc-400 mt-1">
+            Vendors, manufacturers, integrators · linked to Registry parts ·{' '}
+            {suppliers.length} records
           </p>
         </div>
-        <div className="flex flex-wrap gap-3">
-          <Link
-            to="/system-registry"
-            className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-blue-500 flex items-center gap-2"
-          >
-            <Box size={16} /> System Registry
-          </Link>
-          <Link
-            to="/system-architecture"
-            className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-blue-500 flex items-center gap-2"
-          >
-            <Crosshair size={16} /> System Architecture
-          </Link>
-        </div>
-      </div>
-
-      {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-          <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Suppliers</div>
-          <div className="text-2xl font-semibold">{SEED_SUPPLIERS.length}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-          <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Prospect</div>
-          <div className="text-2xl font-semibold">{counts.prospect || 0}</div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-          <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Qualified+</div>
-          <div className="text-2xl font-semibold">
-            {(counts.qualified || 0) + (counts.preferred || 0)}
-          </div>
-        </div>
-        <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-5">
-          <div className="text-xs uppercase tracking-wider text-zinc-500 mb-1">Registry subsystems</div>
-          <div className="text-2xl font-semibold">{subsystems.length}</div>
-          <div className="text-xs text-zinc-500 mt-1">Available to link</div>
-        </div>
-      </div>
-
-      <div className="mb-6 px-4 py-3 rounded-2xl bg-blue-950/30 border border-blue-900/40 text-blue-200 text-sm">
-        Skeleton directory. Per-subsystem Vertical Integrators stay local to each branch; this page
-        is the shared company master. Next: add/edit suppliers and link <code className="text-blue-300">linkedEntityIds</code> to Registry ids.
-      </div>
-
-      <div className="flex flex-col sm:flex-row gap-3 mb-6">
-        <div className="relative flex-1 max-w-md">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500 w-4 h-4" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, domain, country…"
-            className="w-full bg-zinc-900 border border-zinc-700 rounded-2xl pl-10 pr-4 py-2.5 text-sm focus:outline-none focus:border-blue-500"
-          />
-        </div>
-        <div className="flex flex-wrap gap-2 items-center">
-          {(['all', 'prospect', 'engaged', 'qualified', 'preferred', 'do-not-use'] as const).map(
-            (s) => (
-              <button
-                key={s}
-                type="button"
-                onClick={() => setStatusFilter(s)}
-                className={`text-xs px-3 py-1.5 rounded-xl border transition ${
-                  statusFilter === s
-                    ? 'bg-blue-600 border-blue-500 text-white'
-                    : 'bg-zinc-900 border-zinc-700 text-zinc-400 hover:text-white'
-                }`}
-              >
-                {s === 'all' ? 'All' : s}
-              </button>
-            )
-          )}
-        </div>
+        <button
+          type="button"
+          onClick={startCreate}
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium"
+        >
+          <Plus size={16} /> Add supplier
+        </button>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         {/* List */}
-        <div className="xl:col-span-7 bg-zinc-900 border border-zinc-800 rounded-3xl overflow-hidden">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-800 text-left text-xs uppercase tracking-wider text-zinc-500">
-                <th className="px-5 py-4 font-medium">Supplier</th>
-                <th className="px-5 py-4 font-medium">Kind</th>
-                <th className="px-5 py-4 font-medium">Status</th>
-                <th className="px-5 py-4 font-medium">Domains</th>
-                <th className="px-5 py-4 font-medium w-10" />
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((s) => (
-                <tr
+        <div className="xl:col-span-5 space-y-3">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search suppliers…"
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl pl-9 pr-3 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+            />
+          </div>
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl divide-y divide-zinc-800 max-h-[70vh] overflow-y-auto">
+            {filtered.length === 0 ? (
+              <p className="p-6 text-sm text-zinc-600">
+                No suppliers yet. Add a candidate company to start sourcing tracking.
+              </p>
+            ) : (
+              filtered.map((s) => (
+                <button
                   key={s.id}
-                  onClick={() => setSelectedId(s.id)}
-                  className={`border-b border-zinc-800/80 cursor-pointer transition ${
-                    selectedId === s.id ? 'bg-blue-600/20' : 'hover:bg-zinc-800/40'
-                  }`}
+                  type="button"
+                  onClick={() => {
+                    setSelectedId(s.id);
+                    setForm({ ...s });
+                    setEditing(false);
+                  }}
+                  className={
+                    'w-full text-left px-4 py-3 hover:bg-zinc-800/80 transition ' +
+                    (selectedId === s.id ? 'bg-zinc-800/90' : '')
+                  }
                 >
-                  <td className="px-5 py-4">
-                    <div className="font-medium text-white flex items-center gap-2">
-                      <Building2 size={14} className="text-zinc-500" />
-                      {s.name}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-medium text-white truncate">{s.name}</div>
+                      <div className="text-xs text-zinc-500 mt-0.5">
+                        {s.kind} · {s.engagement}
+                        {s.location ? ` · ${s.location}` : ''}
+                      </div>
                     </div>
-                    <div className="text-[11px] text-zinc-600 font-mono mt-0.5">{s.id}</div>
-                  </td>
-                  <td className="px-5 py-4 text-zinc-400">{s.kind}</td>
-                  <td className="px-5 py-4">
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLE[s.status]}`}>
-                      {s.status}
+                    <span
+                      className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${RISK_STYLE[s.risk]}`}
+                    >
+                      {s.risk}
                     </span>
-                  </td>
-                  <td className="px-5 py-4">
-                    <div className="flex flex-wrap gap-1">
-                      {s.domains.map((d) => (
-                        <span
-                          key={d}
-                          className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-700 text-zinc-500"
-                        >
-                          {d}
-                        </span>
-                      ))}
+                  </div>
+                  {s.entityIds.length > 0 && (
+                    <div className="text-[10px] text-zinc-600 mt-1">
+                      {s.entityIds.length} linked part{s.entityIds.length === 1 ? '' : 's'}
                     </div>
-                  </td>
-                  <td className="px-5 py-4 text-zinc-600">
-                    <ChevronRight size={16} />
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center text-zinc-500">
-                    No suppliers match the current filters.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+                  )}
+                </button>
+              ))
+            )}
+          </div>
         </div>
 
-        {/* Detail */}
-        <div className="xl:col-span-5">
-          {selected ? (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 sticky top-6 space-y-5">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[10px] uppercase tracking-wider text-zinc-500">Supplier</p>
-                  <h2 className="text-xl font-semibold text-white mt-1">{selected.name}</h2>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-                      {selected.kind}
-                    </span>
-                    <span className={`text-xs px-2.5 py-1 rounded-full ${STATUS_STYLE[selected.status]}`}>
-                      {selected.status}
-                    </span>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(null)}
-                  className="p-2 rounded-xl text-zinc-500 hover:text-white"
-                >
-                  <X size={16} />
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3">
-                  <div className="text-[10px] uppercase text-zinc-500 mb-1">Country</div>
-                  <div className="text-zinc-300">{selected.country || '—'}</div>
-                </div>
-                <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-3">
-                  <div className="text-[10px] uppercase text-zinc-500 mb-1 flex items-center gap-1">
-                    <Globe size={10} /> Website
-                  </div>
-                  <div className="text-zinc-300 truncate">
-                    {selected.website ? (
-                      <a
-                        href={selected.website}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-blue-400 hover:underline"
-                      >
-                        {selected.website.replace(/^https?:\/\//, '')}
-                      </a>
-                    ) : (
-                      '—'
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-blue-400 mb-2">Domains</h4>
-                <div className="flex flex-wrap gap-2">
-                  {selected.domains.map((d) => (
-                    <span
-                      key={d}
-                      className="text-xs px-3 py-1 rounded-full bg-zinc-950 border border-zinc-700 text-zinc-400"
-                    >
-                      {d}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              {selected.notes && (
-                <div>
-                  <h4 className="text-sm font-medium text-blue-400 mb-2">Notes</h4>
-                  <p className="text-sm text-zinc-400 leading-relaxed">{selected.notes}</p>
-                </div>
-              )}
-
-              <div>
-                <h4 className="text-sm font-medium text-blue-400 mb-2">
-                  Linked Registry entities ({selected.linkedEntityIds.length})
-                </h4>
-                {selected.linkedEntityIds.length === 0 ? (
-                  <p className="text-sm text-zinc-500">
-                    None yet. Next step: attach subsystem / component ids (e.g. sub-optical) so
-                    Vertical Integrators and this directory stay in sync.
-                  </p>
-                ) : (
-                  <ul className="space-y-2">
-                    {selected.linkedEntityIds.map((id) => (
-                      <li key={id}>
-                        <Link
-                          to={`/system-registry?id=${encodeURIComponent(id)}`}
-                          className="text-sm text-blue-400 hover:underline font-mono"
-                        >
-                          {id}
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              <div>
-                <h4 className="text-sm font-medium text-blue-400 mb-2">Link targets (subsystems)</h4>
-                <div className="flex flex-wrap gap-2">
-                  {subsystems.map((sub) => (
-                    <span
-                      key={sub.id}
-                      className="text-[11px] px-2.5 py-1 rounded-xl bg-zinc-950 border border-zinc-800 text-zinc-500"
-                      title={sub.id}
-                    >
-                      {sub.name}
-                    </span>
-                  ))}
-                </div>
-              </div>
+        {/* Detail / edit */}
+        <div className="xl:col-span-7">
+          {!selected && !editing ? (
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-12 text-center text-zinc-500">
+              <Building2 className="mx-auto mb-3 text-zinc-600" size={36} />
+              Select a supplier or add a new one.
             </div>
           ) : (
-            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-10 text-center sticky top-6">
-              <Factory className="mx-auto text-zinc-600 mb-3" size={36} />
-              <p className="text-zinc-400 text-sm">
-                Select a supplier to view profile and Registry link targets.
-              </p>
+            <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 space-y-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <h2 className="text-xl font-semibold">
+                  {editing ? (selectedId ? 'Edit supplier' : 'New supplier') : selected?.name}
+                </h2>
+                <div className="flex flex-wrap gap-2">
+                  {!editing && selected && (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(selected)}
+                      className="px-3 py-1.5 rounded-xl text-xs bg-zinc-800 border border-zinc-600 text-zinc-200"
+                    >
+                      Edit
+                    </button>
+                  )}
+                  {editing && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={handleSave}
+                        disabled={!form.name?.trim()}
+                        className="px-3 py-1.5 rounded-xl text-xs bg-emerald-600 text-white disabled:opacity-40"
+                      >
+                        Save
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditing(false);
+                          if (selected) setForm({ ...selected });
+                          else setForm(emptyForm());
+                        }}
+                        className="px-3 py-1.5 rounded-xl text-xs bg-zinc-800 text-zinc-300"
+                      >
+                        Cancel
+                      </button>
+                    </>
+                  )}
+                  {selectedId && (
+                    <button
+                      type="button"
+                      onClick={handleDelete}
+                      className="px-3 py-1.5 rounded-xl text-xs bg-red-950/40 border border-red-900/50 text-red-300 inline-flex items-center gap-1"
+                    >
+                      <Trash2 size={12} /> Delete
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {editing ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] text-zinc-500 block mb-1">Name</label>
+                    <input
+                      value={form.name || ''}
+                      onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Kind</label>
+                    <select
+                      value={form.kind || 'Vendor'}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, kind: e.target.value as SupplierKind }))
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    >
+                      {KIND_OPTIONS.map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Engagement</label>
+                    <select
+                      value={form.engagement || 'Identified'}
+                      onChange={(e) =>
+                        setForm((f) => ({
+                          ...f,
+                          engagement: e.target.value as EngagementStatus,
+                        }))
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    >
+                      {ENGAGEMENT_OPTIONS.map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Sourcing risk</label>
+                    <select
+                      value={form.risk || 'Unknown'}
+                      onChange={(e) =>
+                        setForm((f) => ({ ...f, risk: e.target.value as SourcingRisk }))
+                      }
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    >
+                      {RISK_OPTIONS.map((k) => (
+                        <option key={k} value={k}>
+                          {k}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Location</label>
+                    <input
+                      value={form.location || ''}
+                      onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Website</label>
+                    <input
+                      value={form.website || ''}
+                      onChange={(e) => setForm((f) => ({ ...f, website: e.target.value }))}
+                      placeholder="https://"
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Contact name</label>
+                    <input
+                      value={form.contactName || ''}
+                      onChange={(e) => setForm((f) => ({ ...f, contactName: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Contact email</label>
+                    <input
+                      value={form.contactEmail || ''}
+                      onChange={(e) => setForm((f) => ({ ...f, contactEmail: e.target.value }))}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    />
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] text-zinc-500 block mb-1">Notes</label>
+                    <textarea
+                      value={form.notes || ''}
+                      onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                      rows={3}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y"
+                    />
+                  </div>
+                </div>
+              ) : (
+                selected && (
+                  <div className="space-y-4 text-sm">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 border border-zinc-700">
+                        {selected.kind}
+                      </span>
+                      <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 border border-zinc-700">
+                        {selected.engagement}
+                      </span>
+                      <span
+                        className={`text-xs px-2.5 py-1 rounded-full ${RISK_STYLE[selected.risk]}`}
+                      >
+                        Risk: {selected.risk}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-zinc-400">
+                      {selected.location && (
+                        <div>
+                          <div className="text-[11px] text-zinc-600">Location</div>
+                          {selected.location}
+                        </div>
+                      )}
+                      {selected.website && (
+                        <div>
+                          <div className="text-[11px] text-zinc-600">Website</div>
+                          <a
+                            href={selected.website}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-400 hover:underline break-all"
+                          >
+                            {selected.website}
+                          </a>
+                        </div>
+                      )}
+                      {selected.contactName && (
+                        <div>
+                          <div className="text-[11px] text-zinc-600">Contact</div>
+                          {selected.contactName}
+                          {selected.contactEmail ? ` · ${selected.contactEmail}` : ''}
+                        </div>
+                      )}
+                    </div>
+                    {selected.notes && (
+                      <p className="text-zinc-300 whitespace-pre-wrap">{selected.notes}</p>
+                    )}
+                  </div>
+                )
+              )}
+
+              {/* Linked parts */}
+              {selected && !editing && (
+                <div className="pt-4 border-t border-zinc-800 space-y-3">
+                  <h3 className="text-sm font-medium text-blue-400 flex items-center gap-2">
+                    <Link2 size={14} /> Linked Registry parts
+                  </h3>
+
+                  {selected.entityIds.length === 0 ? (
+                    <p className="text-xs text-zinc-600">
+                      No parts linked. Connect this supplier to components you may buy from them.
+                    </p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {selected.entityIds.map((eid) => {
+                        const ent = byId.get(eid);
+                        const sourcing = getEntitySourcing(eid);
+                        return (
+                          <li
+                            key={eid}
+                            className="bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3 flex flex-col sm:flex-row sm:items-center gap-3"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-white truncate">
+                                  {ent?.name || eid}
+                                </span>
+                                {ent && (
+                                  <Link
+                                    to={`/system-registry?id=${encodeURIComponent(eid)}`}
+                                    className="text-zinc-600 hover:text-blue-400"
+                                  >
+                                    <ExternalLink size={12} />
+                                  </Link>
+                                )}
+                              </div>
+                              <div className="text-[10px] text-zinc-600 mt-0.5">
+                                {ent?.type || 'Unknown'} · Make/Buy: {sourcing.makeBuy}
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <select
+                                value={sourcing.makeBuy}
+                                onChange={(e) =>
+                                  setEntitySourcing(eid, {
+                                    makeBuy: e.target.value as MakeBuy,
+                                    preferredSupplierId: selected.id,
+                                  })
+                                }
+                                className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-xs"
+                              >
+                                {MAKE_BUY_OPTIONS.map((m) => (
+                                  <option key={m} value={m}>
+                                    {m}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                onClick={() => unlinkSupplierFromEntity(selected.id, eid)}
+                                className="text-xs text-zinc-500 hover:text-red-300"
+                              >
+                                Unlink
+                              </button>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                    <select
+                      value={linkEntityId}
+                      onChange={(e) => setLinkEntityId(e.target.value)}
+                      className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                    >
+                      <option value="">Link a Registry part…</option>
+                      {partOptions.map((e) => (
+                        <option key={e.id} value={e.id}>
+                          {e.name} ({e.type})
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      onClick={handleLink}
+                      disabled={!linkEntityId}
+                      className="px-4 py-2 rounded-xl text-sm bg-zinc-800 border border-zinc-600 text-zinc-200 disabled:opacity-40"
+                    >
+                      Link part
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
       </div>
+
+      <p className="text-xs text-zinc-600 mt-6">
+        Stored on this browser until the product store moves to Amplify. Link suppliers to the same
+        entity ids used in Registry and Planning &amp; Cost.
+      </p>
     </div>
   );
 };
