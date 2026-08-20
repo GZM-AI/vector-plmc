@@ -5,11 +5,12 @@ import { generateClient } from 'aws-amplify/data'
 import './index.css'
 import App from './App.tsx'
 import { configureHotspotAmplify } from './lib/hotspotLayoutStore'
+import { configureProductAmplify } from './lib/productAmplify'
+import { hydrateConfigStoreFromCloud } from './lib/configStore'
 import type { Schema } from '../amplify/data/resource'
 
 async function boot() {
   try {
-    // Loaded at runtime from /public so Vite build does not need the file in git
     const res = await fetch('/amplify_outputs.json')
     if (!res.ok) throw new Error(`amplify_outputs.json HTTP ${res.status}`)
     const outputs = await res.json()
@@ -17,11 +18,14 @@ async function boot() {
 
     const client = generateClient<Schema>({ authMode: 'apiKey' })
     configureHotspotAmplify(client as any)
-    console.log('PLM Console — Data client authMode: apiKey')
-    console.log('PLM Console starting — Amplify Data client configured (MapLayout)')
+    configureProductAmplify(client)
+    console.log('PLM Console — Data client authMode: apiKey (MapLayout + Registry spine)')
+
+    // Pull shared Registry data before UI relies on it
+    await hydrateConfigStoreFromCloud()
   } catch (err) {
     console.warn(
-      'PLM Console starting — Amplify not configured (no amplify_outputs.json). Layout will use local cache only.',
+      'PLM Console — Amplify not fully configured; Registry will use local cache only.',
       err
     )
   }
