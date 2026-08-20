@@ -1,6 +1,6 @@
 /**
  * Suppliers — vendors, manufacturers, integrators
- * Link to System Registry entities; make-vs-buy + engagement + risk.
+ * Link Registry parts on New/Edit form and on detail view.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -124,6 +124,25 @@ const Suppliers: React.FC = () => {
     );
   }, [suppliers, search]);
 
+  const partOptions = useMemo(() => {
+    return entities
+      .filter((e) => e.type !== 'System' && e.type !== 'Subsystem')
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [entities]);
+
+  const toggleFormEntity = (entityId: string) => {
+    setForm((f) => {
+      const ids = f.entityIds || [];
+      return {
+        ...f,
+        entityIds: ids.includes(entityId)
+          ? ids.filter((id) => id !== entityId)
+          : [...ids, entityId],
+      };
+    });
+  };
+
   const startCreate = () => {
     setSelectedId(null);
     setForm(emptyForm());
@@ -132,7 +151,7 @@ const Suppliers: React.FC = () => {
 
   const startEdit = (s: Supplier) => {
     setSelectedId(s.id);
-    setForm({ ...s });
+    setForm({ ...s, entityIds: [...(s.entityIds || [])] });
     setEditing(true);
   };
 
@@ -142,9 +161,10 @@ const Suppliers: React.FC = () => {
       ...form,
       id: selectedId || undefined,
       name: form.name,
+      entityIds: form.entityIds || [],
     });
     setSelectedId(saved.id);
-    setForm({ ...saved });
+    setForm({ ...saved, entityIds: [...(saved.entityIds || [])] });
     setEditing(false);
   };
 
@@ -163,12 +183,51 @@ const Suppliers: React.FC = () => {
     setLinkEntityId('');
   };
 
-  const partOptions = useMemo(() => {
-    return entities
-      .filter((e) => e.type !== 'System' && e.type !== 'Subsystem')
-      .slice()
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }, [entities]);
+  const partsChecklist = (
+    <div className="sm:col-span-2">
+      <label className="text-[11px] text-zinc-500 block mb-2">
+        Registry parts this supplier addresses
+      </label>
+      <p className="text-[11px] text-zinc-600 mb-2">
+        Select components / software / interfaces. Parent subsystem is shown under each name.
+      </p>
+      <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
+        {partOptions.length === 0 ? (
+          <p className="p-3 text-xs text-zinc-600">No parts in Registry yet.</p>
+        ) : (
+          partOptions.map((e) => {
+            const parent = e.parentId ? byId.get(e.parentId) : undefined;
+            const checked = (form.entityIds || []).includes(e.id);
+            return (
+              <label
+                key={e.id}
+                className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleFormEntity(e.id)}
+                  className="mt-1"
+                />
+                <span className="min-w-0">
+                  <span className="text-sm text-zinc-200 block truncate">{e.name}</span>
+                  <span className="text-[10px] text-zinc-600">
+                    {e.type}
+                    {parent ? ` · ${parent.name}` : ''}
+                  </span>
+                </span>
+              </label>
+            );
+          })
+        )}
+      </div>
+      {(form.entityIds?.length || 0) > 0 && (
+        <p className="text-[11px] text-zinc-500 mt-2">
+          {form.entityIds!.length} part{form.entityIds!.length === 1 ? '' : 's'} selected
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <div className="p-6 lg:p-8 max-w-[1600px] mx-auto min-h-screen text-white">
@@ -192,7 +251,6 @@ const Suppliers: React.FC = () => {
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
-        {/* List */}
         <div className="xl:col-span-5 space-y-3">
           <div className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
@@ -216,7 +274,7 @@ const Suppliers: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setSelectedId(s.id);
-                    setForm({ ...s });
+                    setForm({ ...s, entityIds: [...(s.entityIds || [])] });
                     setEditing(false);
                   }}
                   className={
@@ -249,7 +307,6 @@ const Suppliers: React.FC = () => {
           </div>
         </div>
 
-        {/* Detail / edit */}
         <div className="xl:col-span-7">
           {!selected && !editing ? (
             <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-12 text-center text-zinc-500">
@@ -286,7 +343,7 @@ const Suppliers: React.FC = () => {
                         type="button"
                         onClick={() => {
                           setEditing(false);
-                          if (selected) setForm({ ...selected });
+                          if (selected) setForm({ ...selected, entityIds: [...selected.entityIds] });
                           else setForm(emptyForm());
                         }}
                         className="px-3 py-1.5 rounded-xl text-xs bg-zinc-800 text-zinc-300"
@@ -410,6 +467,7 @@ const Suppliers: React.FC = () => {
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y"
                     />
                   </div>
+                  {partsChecklist}
                 </div>
               ) : (
                 selected && (
@@ -462,7 +520,6 @@ const Suppliers: React.FC = () => {
                 )
               )}
 
-              {/* Linked parts */}
               {selected && !editing && (
                 <div className="pt-4 border-t border-zinc-800 space-y-3">
                   <h3 className="text-sm font-medium text-blue-400 flex items-center gap-2">
@@ -471,12 +528,13 @@ const Suppliers: React.FC = () => {
 
                   {selected.entityIds.length === 0 ? (
                     <p className="text-xs text-zinc-600">
-                      No parts linked. Connect this supplier to components you may buy from them.
+                      No parts linked. Use Edit to select parts, or link one below.
                     </p>
                   ) : (
                     <ul className="space-y-2">
                       {selected.entityIds.map((eid) => {
                         const ent = byId.get(eid);
+                        const parent = ent?.parentId ? byId.get(ent.parentId) : undefined;
                         const sourcing = getEntitySourcing(eid);
                         return (
                           <li
@@ -498,7 +556,8 @@ const Suppliers: React.FC = () => {
                                 )}
                               </div>
                               <div className="text-[10px] text-zinc-600 mt-0.5">
-                                {ent?.type || 'Unknown'} · Make/Buy: {sourcing.makeBuy}
+                                {ent?.type || 'Unknown'}
+                                {parent ? ` · ${parent.name}` : ''} · Make/Buy: {sourcing.makeBuy}
                               </div>
                             </div>
                             <div className="flex flex-wrap items-center gap-2">
@@ -538,7 +597,7 @@ const Suppliers: React.FC = () => {
                       onChange={(e) => setLinkEntityId(e.target.value)}
                       className="flex-1 bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
                     >
-                      <option value="">Link a Registry part…</option>
+                      <option value="">Link another Registry part…</option>
                       {partOptions.map((e) => (
                         <option key={e.id} value={e.id}>
                           {e.name} ({e.type})
@@ -562,8 +621,8 @@ const Suppliers: React.FC = () => {
       </div>
 
       <p className="text-xs text-zinc-600 mt-6">
-        Stored on this browser until the product store moves to Amplify. Link suppliers to the same
-        entity ids used in Registry and Planning &amp; Cost.
+        Stored on this browser until the product store moves to Amplify. Parts checklist on New/Edit
+        saves entity links with the supplier.
       </p>
     </div>
   );

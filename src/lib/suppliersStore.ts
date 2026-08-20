@@ -29,13 +29,11 @@ export type Supplier = {
   engagement: EngagementStatus;
   risk: SourcingRisk;
   notes?: string;
-  /** Registry entity ids this supplier is candidate/source for */
   entityIds: string[];
   createdAt: string;
   updatedAt: string;
 };
 
-/** Per–Registry-entity sourcing intent (optional overlay on a part) */
 export type EntitySourcing = {
   entityId: string;
   makeBuy: MakeBuy;
