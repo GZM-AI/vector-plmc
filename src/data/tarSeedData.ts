@@ -2,7 +2,14 @@
  * TAR™ (Trajectory Adjusting Rifle) — Canonical Seed Dataset
  * Vector · Product Lifecycle Management
  *
- * Vertical Integrators = per-subsystem candidates only (not shared).
+ * Hierarchy (strict four levels):
+ *   TAR™ (System)
+ *    └── Subsystem
+ *         └── Component
+ *              └── Element  (kind: hardware | software | interface | integrator | other)
+ *
+ * Vertical Integrators = per-subsystem candidates only (not shared),
+ * modeled as Element + kind: 'integrator' under each subsystem's Core Elements component.
  *
  * Phase 0: every entity carries revision + ReleaseStatus + lastModified/modifiedBy
  * and optional attachmentIds linking to Document records (see documentsSeed.ts).
@@ -13,11 +20,12 @@ import type {
   ReleaseStatus,
   LifecycleStage,
   Classification,
+  ElementKind,
 } from '../types/plm';
 import { DOCUMENTS } from './documentsSeed';
 
 // Re-export types used by pages so existing imports from this module keep working
-export type { ResourceEntity, StructuralEntityType as EntityType, ReleaseStatus };
+export type { ResourceEntity, StructuralEntityType as EntityType, ReleaseStatus, ElementKind };
 export type EntityStatus = ReleaseStatus; // alias for gradual migration of STATUS_STYLE maps
 
 /** @deprecated Prefer ReleaseStatus; kept for any residual maturity display */
@@ -37,6 +45,7 @@ function e(
     modifiedBy?: string;
     attachmentIds?: string[];
     classification?: Classification;
+    kind?: ElementKind;
   }
 ): ResourceEntity {
   return {
@@ -51,15 +60,35 @@ function e(
   };
 }
 
-function verticalIntegrators(parentId: string, subsystemLabel: string): ResourceEntity {
+/** Vertical Integrators — Element under the subsystem's Core Elements component */
+function verticalIntegrators(coreElementsId: string, subsystemLabel: string): ResourceEntity {
   return e({
-    id: `${parentId}-vertical-integrators`,
+    id: `${coreElementsId.replace(/-core-elements$/, '')}-vertical-integrators`,
     name: 'Vertical Integrators',
-    type: 'Capability',
+    type: 'Element',
+    kind: 'integrator',
     description: `Candidate companies and products to integrate into ${subsystemLabel}. Local to this subsystem only.`,
-    parentId,
+    parentId: coreElementsId,
     tags: ['vertical-integration', 'suppliers', 'sourcing'],
     metadata: { purpose: 'per-subsystem supplier & product candidates', scope: 'local-to-parent' },
+  });
+}
+
+/** Auto-created Component that holds former SoftwareItem / Interface / Capability leaves */
+function coreElements(
+  subsystemId: string,
+  subsystemLabel: string,
+  elements: ResourceEntity[]
+): ResourceEntity {
+  const id = `${subsystemId}-core-elements`;
+  return e({
+    id,
+    name: 'Core Elements',
+    type: 'Component',
+    parentId: subsystemId,
+    description: `Software, interfaces, integrators, and other leaf elements for ${subsystemLabel}.`,
+    tags: ['core-elements'],
+    children: withParent(id, elements),
   });
 }
 
@@ -70,6 +99,8 @@ function withParent(parentId: string, nodes: ResourceEntity[]): ResourceEntity[]
     children: n.children ? withParent(n.id, n.children) : n.children,
   }));
 }
+
+// ─── Subsystems ──────────────────────────────────────────────────────────────
 
 const SUB_SCOPE: ResourceEntity = e({
   id: 'sub-scope',
@@ -104,7 +135,9 @@ const SUB_SCOPE: ResourceEntity = e({
       attachmentIds: ['doc-scope-zero-proc'],
       status: 'Released',
     }),
-    verticalIntegrators('sub-scope', 'Scope'),
+    coreElements('sub-scope', 'Scope', [
+      verticalIntegrators('sub-scope-core-elements', 'Scope'),
+    ]),
   ]),
 });
 
@@ -141,7 +174,9 @@ const SUB_OPTICAL: ResourceEntity = e({
       attachmentIds: ['doc-opt-form-factor-spec'],
       status: 'In Review',
     }),
-    verticalIntegrators('sub-optical', 'Sensor Integration'),
+    coreElements('sub-optical', 'Sensor Integration', [
+      verticalIntegrators('sub-optical-core-elements', 'Sensor Integration'),
+    ]),
   ]),
 });
 
@@ -161,22 +196,24 @@ const SUB_MACHINE_VISION: ResourceEntity = e({
       parentId: 'sub-machine-vision',
       description: 'Camera selection, lens, frame rate, and mounting geometry.',
     }),
-    e({
-      id: 'sw-mv-pipeline',
-      name: 'Vision Pipeline Software',
-      type: 'SoftwareItem',
-      parentId: 'sub-machine-vision',
-      description: 'Detection / tracking software path.',
-      attachmentIds: ['doc-mv-pipeline-arch'],
-    }),
-    e({
-      id: 'iface-mv-rt',
-      name: 'Real-Time Vision Output',
-      type: 'Interface',
-      parentId: 'sub-machine-vision',
-      description: 'Interface from vision into fusion / coordinate mapping.',
-    }),
-    verticalIntegrators('sub-machine-vision', 'Machine Vision'),
+    coreElements('sub-machine-vision', 'Machine Vision', [
+      e({
+        id: 'sw-mv-pipeline',
+        name: 'Vision Pipeline Software',
+        type: 'Element',
+        kind: 'software',
+        description: 'Detection / tracking software path.',
+        attachmentIds: ['doc-mv-pipeline-arch'],
+      }),
+      e({
+        id: 'iface-mv-rt',
+        name: 'Real-Time Vision Output',
+        type: 'Element',
+        kind: 'interface',
+        description: 'Interface from vision into fusion / coordinate mapping.',
+      }),
+      verticalIntegrators('sub-machine-vision-core-elements', 'Machine Vision'),
+    ]),
   ]),
 });
 
@@ -190,20 +227,22 @@ const SUB_SENSOR_FUSION: ResourceEntity = e({
   lifecycleStage: 'concept',
   children: withParent('sub-sensor-fusion', [
     e({
-      id: 'sw-sf-estimator',
-      name: 'State Estimator',
-      type: 'SoftwareItem',
-      parentId: 'sub-sensor-fusion',
-      description: 'Fusion filter / estimator implementation.',
-    }),
-    e({
       id: 'comp-sf-imu',
       name: 'IMU / Motion Sensing',
       type: 'Component',
       parentId: 'sub-sensor-fusion',
       description: 'Inertial sensing package and mounting.',
     }),
-    verticalIntegrators('sub-sensor-fusion', 'Sensor Fusion'),
+    coreElements('sub-sensor-fusion', 'Sensor Fusion', [
+      e({
+        id: 'sw-sf-estimator',
+        name: 'State Estimator',
+        type: 'Element',
+        kind: 'software',
+        description: 'Fusion filter / estimator implementation.',
+      }),
+      verticalIntegrators('sub-sensor-fusion-core-elements', 'Sensor Fusion'),
+    ]),
   ]),
 });
 
@@ -217,20 +256,22 @@ const SUB_BALLISTICS: ResourceEntity = e({
   lifecycleStage: 'concept',
   children: withParent('sub-ballistics', [
     e({
-      id: 'sw-bal-engine',
-      name: 'Ballistics Engine',
-      type: 'SoftwareItem',
-      parentId: 'sub-ballistics',
-      description: 'Core ballistic solver and solution outputs.',
-    }),
-    e({
       id: 'comp-bal-env',
       name: 'Environmental Inputs',
       type: 'Component',
       parentId: 'sub-ballistics',
       description: 'Atmosphere, ammo, and related input models.',
     }),
-    verticalIntegrators('sub-ballistics', 'Ballistic Computation'),
+    coreElements('sub-ballistics', 'Ballistic Computation', [
+      e({
+        id: 'sw-bal-engine',
+        name: 'Ballistics Engine',
+        type: 'Element',
+        kind: 'software',
+        description: 'Core ballistic solver and solution outputs.',
+      }),
+      verticalIntegrators('sub-ballistics-core-elements', 'Ballistic Computation'),
+    ]),
   ]),
 });
 
@@ -251,21 +292,23 @@ const SUB_PIXEL_TO_POSITION: ResourceEntity = e({
       parentId: 'sub-pixel-to-position',
       description: 'Intrinsic/extrinsic calibration and pixel-to-angle or pixel-to-world mapping.',
     }),
-    e({
-      id: 'sw-ptp-pipeline',
-      name: 'Coordinate Pipeline',
-      type: 'SoftwareItem',
-      parentId: 'sub-pixel-to-position',
-      description: 'Software path from pixels/detections to position estimates.',
-    }),
-    e({
-      id: 'iface-ptp-output',
-      name: 'Position Output Interface',
-      type: 'Interface',
-      parentId: 'sub-pixel-to-position',
-      description: 'Output interface into ballistics / sensor fusion / closed loop / actuation.',
-    }),
-    verticalIntegrators('sub-pixel-to-position', 'Pixel to Position'),
+    coreElements('sub-pixel-to-position', 'Pixel to Position', [
+      e({
+        id: 'sw-ptp-pipeline',
+        name: 'Coordinate Pipeline',
+        type: 'Element',
+        kind: 'software',
+        description: 'Software path from pixels/detections to position estimates.',
+      }),
+      e({
+        id: 'iface-ptp-output',
+        name: 'Position Output Interface',
+        type: 'Element',
+        kind: 'interface',
+        description: 'Output interface into ballistics / sensor fusion / closed loop / actuation.',
+      }),
+      verticalIntegrators('sub-pixel-to-position-core-elements', 'Pixel to Position'),
+    ]),
   ]),
 });
 
@@ -295,14 +338,16 @@ const SUB_BARREL_ACTUATION: ResourceEntity = e({
       attachmentIds: ['doc-ba-mount-drawing'],
       status: 'Draft',
     }),
-    e({
-      id: 'iface-ba-cmd',
-      name: 'Actuation Command Interface',
-      type: 'Interface',
-      parentId: 'sub-barrel-actuation',
-      description: 'Command path from closed-loop control.',
-    }),
-    verticalIntegrators('sub-barrel-actuation', 'Barrel Actuation'),
+    coreElements('sub-barrel-actuation', 'Barrel Actuation', [
+      e({
+        id: 'iface-ba-cmd',
+        name: 'Actuation Command Interface',
+        type: 'Element',
+        kind: 'interface',
+        description: 'Command path from closed-loop control.',
+      }),
+      verticalIntegrators('sub-barrel-actuation-core-elements', 'Barrel Actuation'),
+    ]),
   ]),
 });
 
@@ -329,7 +374,9 @@ const SUB_CHASSIS: ResourceEntity = e({
       parentId: 'sub-chassis',
       description: 'Mechanical interfaces for optics, actuation, power, and receiver.',
     }),
-    verticalIntegrators('sub-chassis', 'Chassis'),
+    coreElements('sub-chassis', 'Chassis', [
+      verticalIntegrators('sub-chassis-core-elements', 'Chassis'),
+    ]),
   ]),
 });
 
@@ -356,7 +403,9 @@ const SUB_RECEIVER: ResourceEntity = e({
       parentId: 'sub-receiver',
       description: 'Compatibility with host platforms and standards.',
     }),
-    verticalIntegrators('sub-receiver', 'Receiver Configuration'),
+    coreElements('sub-receiver', 'Receiver Configuration', [
+      verticalIntegrators('sub-receiver-core-elements', 'Receiver Configuration'),
+    ]),
   ]),
 });
 
@@ -383,7 +432,9 @@ const SUB_TRIGGER: ResourceEntity = e({
       parentId: 'sub-trigger',
       description: 'Interface between trigger and electronic fire control if present.',
     }),
-    verticalIntegrators('sub-trigger', 'Trigger'),
+    coreElements('sub-trigger', 'Trigger', [
+      verticalIntegrators('sub-trigger-core-elements', 'Trigger'),
+    ]),
   ]),
 });
 
@@ -410,7 +461,9 @@ const SUB_POWER: ResourceEntity = e({
       parentId: 'sub-power',
       description: 'Rails, regulation, and distribution to subsystems.',
     }),
-    verticalIntegrators('sub-power', 'Power'),
+    coreElements('sub-power', 'Power', [
+      verticalIntegrators('sub-power-core-elements', 'Power'),
+    ]),
   ]),
 });
 
@@ -423,22 +476,24 @@ const SUB_CLOSED_LOOP: ResourceEntity = e({
   tags: ['control', 'software'],
   lifecycleStage: 'concept',
   children: withParent('sub-closed-loop', [
-    e({
-      id: 'sw-cl-controller',
-      name: 'Control Law / Controller',
-      type: 'SoftwareItem',
-      parentId: 'sub-closed-loop',
-      description: 'Real-time control implementation.',
-      attachmentIds: ['doc-cl-control-law'],
-    }),
-    e({
-      id: 'iface-cl-io',
-      name: 'Sense / Actuate Interfaces',
-      type: 'Interface',
-      parentId: 'sub-closed-loop',
-      description: 'I/O boundaries to fusion and actuation.',
-    }),
-    verticalIntegrators('sub-closed-loop', 'Closed Loop'),
+    coreElements('sub-closed-loop', 'Closed Loop', [
+      e({
+        id: 'sw-cl-controller',
+        name: 'Control Law / Controller',
+        type: 'Element',
+        kind: 'software',
+        description: 'Real-time control implementation.',
+        attachmentIds: ['doc-cl-control-law'],
+      }),
+      e({
+        id: 'iface-cl-io',
+        name: 'Sense / Actuate Interfaces',
+        type: 'Element',
+        kind: 'interface',
+        description: 'I/O boundaries to fusion and actuation.',
+      }),
+      verticalIntegrators('sub-closed-loop-core-elements', 'Closed Loop'),
+    ]),
   ]),
 });
 

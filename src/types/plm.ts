@@ -4,8 +4,14 @@
  *
  * Sequencing: Phase 0 (this file) → Phase 1 (revision history / baselines) → Phase 2 (ChangeRequest workflow)
  *
+ * Hierarchy (strict four levels):
+ *   TAR™ (System)
+ *    └── Subsystem
+ *         └── Component
+ *              └── Element  (kind: hardware | software | interface | integrator | other)
+ *
  * Design principles:
- * - Single source of truth hierarchy remains the navigation spine (System → Subsystems → children)
+ * - Single source of truth hierarchy remains the navigation spine
  * - Every product entity carries revision + release status + audit fields
  * - Documents attach to any entity without altering System Architecture UX
  */
@@ -27,14 +33,23 @@ export type LifecycleStage =
   | 'production'
   | 'obsolete';
 
-/** Structural entity kinds in the product hierarchy */
+/**
+ * Structural entity kinds in the product hierarchy (strict four levels).
+ * Former SoftwareItem / Interface / Capability are now Element + kind.
+ */
 export type StructuralEntityType =
   | 'System'
   | 'Subsystem'
   | 'Component'
-  | 'SoftwareItem'
-  | 'Interface'
-  | 'Capability'; // Vertical Integrators node (per-subsystem)
+  | 'Element';
+
+/** Classification of a leaf Element */
+export type ElementKind =
+  | 'hardware'
+  | 'software'
+  | 'interface'
+  | 'integrator'
+  | 'other';
 
 /** Full set of PLM object types (Phase 0 + forward-looking) */
 export type PlmEntityType =
@@ -60,13 +75,15 @@ export type DocumentKind =
   | 'procedure'
   | 'other';
 
+/** Aligns with Change Control v1 status flow */
 export type ChangeRequestStatus =
   | 'Draft'
+  | 'Submitted'
   | 'In Review'
   | 'Approved'
+  | 'Rejected'
   | 'Implemented'
-  | 'Closed'
-  | 'Rejected';
+  | 'Closed';
 
 export type RequirementPriority = 'must' | 'should' | 'could' | 'wont';
 export type CoverageStatus = 'uncovered' | 'partial' | 'covered' | 'verified';
@@ -132,8 +149,8 @@ export interface AttachmentRef {
 // ─── Structural product entities ────────────────────────────────────────────
 
 /**
- * Canonical hierarchical product entity (System → Subsystem → Component / SW / Interface / VI).
- * Extends prior ResourceEntity with Phase 0 revision + attachment support.
+ * Canonical hierarchical product entity.
+ * System → Subsystem → Component → Element (with optional kind).
  */
 export interface ResourceEntity extends RevisionFields, ClassificationFields {
   id: string;
@@ -151,6 +168,11 @@ export interface ResourceEntity extends RevisionFields, ClassificationFields {
    * Prefer `status` (ReleaseStatus) for configuration management.
    */
   lifecycleStage?: LifecycleStage;
+  /**
+   * Only set when type === 'Element'.
+   * Distinguishes hardware / software / interface / integrator / other.
+   */
+  kind?: ElementKind;
 }
 
 // ─── Forward-looking Phase 1–3 shapes (interfaces only) ─────────────────────
@@ -267,3 +289,19 @@ export const RELEASE_STATUS_ORDER: ReleaseStatus[] = [
 
 export const DEFAULT_REVISION = 'A';
 export const DEFAULT_RELEASE_STATUS: ReleaseStatus = 'Draft';
+
+/** Allowed children by parent type (strict four-level rules) */
+export const ALLOWED_CHILD_TYPES: Record<StructuralEntityType, StructuralEntityType[]> = {
+  System: ['Subsystem'],
+  Subsystem: ['Component'],
+  Component: ['Element'],
+  Element: [],
+};
+
+export const ELEMENT_KIND_LABEL: Record<ElementKind, string> = {
+  hardware: 'Hardware',
+  software: 'Software',
+  interface: 'Interface',
+  integrator: 'Integrator',
+  other: 'Other',
+};

@@ -3,6 +3,9 @@
  * Overview | Tree (type filter) | Deep-link ?id=
  * Phase 0: revision + status + attachments
  * Phase 1: revision history timeline + bump revision (configStore)
+ *
+ * Hierarchy (strict four levels):
+ *   TAR™ (System) → Subsystem → Component → Element (kind)
  */
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
@@ -27,6 +30,7 @@ import {
   History,
   ArrowUpCircle,
   Bookmark,
+  Wrench,
 } from 'lucide-react';
 import {
   ResourceEntity,
@@ -35,7 +39,14 @@ import {
   SUBSYSTEM_COLORS,
 } from '../data/tarSeedData';
 import { documentsForEntity } from '../data/documentsSeed';
-import type { Document, ReleaseStatus, RevisionRecord } from '../types/plm';
+import type {
+  Document,
+  ElementKind,
+  ReleaseStatus,
+  RevisionRecord,
+  StructuralEntityType,
+} from '../types/plm';
+import { ALLOWED_CHILD_TYPES, ELEMENT_KIND_LABEL } from '../types/plm';
 import {
   applyOverlay,
   bumpEntityRevision,
@@ -45,7 +56,6 @@ import {
   addChildEntity,
   getRegistryTree,
   getMergedAllEntities,
-  type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
 
@@ -55,19 +65,39 @@ const TYPE_ICON: Record<EntityType, React.ReactNode> = {
   System: <Crosshair size={16} className="text-blue-400" />,
   Subsystem: <Layers size={16} className="text-violet-400" />,
   Component: <Package size={16} className="text-zinc-300" />,
-  SoftwareItem: <Cpu size={16} className="text-emerald-400" />,
-  Interface: <GitBranch size={16} className="text-sky-400" />,
-  Capability: <Zap size={16} className="text-amber-400" />,
+  Element: <Wrench size={16} className="text-amber-400" />,
 };
 
 const TYPE_LABEL: Record<EntityType, string> = {
   System: 'System',
   Subsystem: 'Subsystem',
   Component: 'Component',
-  SoftwareItem: 'Software',
-  Interface: 'Interface',
-  Capability: 'Integrator',
+  Element: 'Element',
 };
+
+/** Kind-aware icon for Elements (falls back to generic Element icon) */
+function entityIcon(entity: ResourceEntity): React.ReactNode {
+  if (entity.type !== 'Element' || !entity.kind) return TYPE_ICON[entity.type];
+  switch (entity.kind) {
+    case 'software':
+      return <Cpu size={16} className="text-emerald-400" />;
+    case 'interface':
+      return <GitBranch size={16} className="text-sky-400" />;
+    case 'integrator':
+      return <Zap size={16} className="text-amber-400" />;
+    case 'hardware':
+      return <Package size={16} className="text-zinc-300" />;
+    default:
+      return <Wrench size={16} className="text-amber-400" />;
+  }
+}
+
+function entityTypeLabel(entity: ResourceEntity): string {
+  if (entity.type === 'Element' && entity.kind) {
+    return `Element · ${ELEMENT_KIND_LABEL[entity.kind]}`;
+  }
+  return TYPE_LABEL[entity.type];
+}
 
 const STATUS_STYLE: Record<EntityStatus, string> = {
   Draft: 'bg-zinc-700 text-zinc-300',
@@ -100,6 +130,7 @@ const SUBSYSTEM_ACCENT: Record<string, string> = {
   yellow: 'border-yellow-500/40 bg-yellow-950/20',
   cyan: 'border-cyan-500/40 bg-cyan-950/20',
   rose: 'border-rose-500/40 bg-rose-950/20',
+  indigo: 'border-indigo-500/40 bg-indigo-950/20',
 };
 
 function nodeMatchesTypeFilter(node: ResourceEntity, typeFilter: EntityType | 'all'): boolean {
@@ -172,7 +203,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         ) : (
           <span className="w-4 shrink-0" />
         )}
-        <span className="shrink-0">{TYPE_ICON[node.type]}</span>
+        <span className="shrink-0">{entityIcon(node)}</span>
         <span
           className={`text-sm truncate flex-1 ${
             isSelected ? 'text-white font-medium' : 'text-zinc-300 group-hover:text-white'
@@ -253,10 +284,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
-  const [childType, setChildType] = useState<AddableChildType>('Component');
+  const [childType, setChildType] = useState<StructuralEntityType>('Component');
+  const [childKind, setChildKind] = useState<ElementKind>('hardware');
   const [childDescription, setChildDescription] = useState('');
 
-  const canAddChild = entity.type === 'System' || entity.type === 'Subsystem';
+  const allowedChildTypes = ALLOWED_CHILD_TYPES[entity.type] || [];
+  const canAddChild = allowedChildTypes.length > 0;
 
   // Keep drafts in sync when selecting another entity or overlay updates
   useEffect(() => {
@@ -268,8 +301,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setShowAddChild(false);
     setChildName('');
     setChildDescription('');
-    setChildType('Component');
-  }, [entity.id, entity.name, entity.description, entity.revision]);
+    const defaults = ALLOWED_CHILD_TYPES[entity.type] || [];
+    setChildType(defaults[0] || 'Component');
+    setChildKind('hardware');
+  }, [entity.id, entity.name, entity.description, entity.revision, entity.type]);
 
   const previewNext = nextRevision(entity.revision);
 
@@ -309,7 +344,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     });
     if (updated) {
       setEditing(false);
-      setSaveMsg('Saved on this device. Cloud sync comes next (same pattern as zone map).');
+      setSaveMsg('Saved. Cloud overlay synced when Amplify is available.');
     }
   };
 
@@ -318,12 +353,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       name: childName,
       type: childType,
       description: childDescription,
+      kind: childType === 'Element' ? childKind : undefined,
     });
     if (created) {
       setShowAddChild(false);
       setChildName('');
       setChildDescription('');
-      setChildType('Component');
+      const defaults = ALLOWED_CHILD_TYPES[entity.type] || [];
+      setChildType(defaults[0] || 'Component');
+      setChildKind('hardware');
       setSaveMsg(`Added “${created.name}” under ${entity.name}.`);
       onSelectRelated?.(created.id);
     }
@@ -342,12 +380,19 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     return Array.from(set);
   }, [history, entity.revision]);
 
+  const addChildHint = () => {
+    if (entity.type === 'System') return 'Add a Subsystem under TAR™.';
+    if (entity.type === 'Subsystem') return 'Add a Component under this Subsystem.';
+    if (entity.type === 'Component') return 'Add an Element (hardware, software, interface, integrator, …).';
+    return '';
+  };
+
   return (
     <div className={`bg-zinc-900 border ${accent} rounded-3xl p-8 space-y-6`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-zinc-950 border border-zinc-700 flex items-center justify-center shrink-0">
-            {TYPE_ICON[entity.type]}
+            {entityIcon(entity)}
           </div>
           <div className="min-w-0">
             {editing ? (
@@ -361,7 +406,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-                {TYPE_LABEL[entity.type]}
+                {entityTypeLabel(entity)}
               </span>
               <span className={`text-xs px-2.5 py-1 rounded-full ${STATUS_STYLE[entity.status]}`}>
                 {entity.status}
@@ -378,7 +423,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </div>
         </div>
 
-        {/* ── Top-right: ID + formal last-modified stamp ── */}
+        {/* Top-right: ID + formal last-modified stamp */}
         <div className="text-xs text-zinc-500 text-right shrink-0 space-y-2">
           <div>ID: {entity.id}</div>
           {(entity.modifiedBy || entity.lastModified) && (
@@ -507,7 +552,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             value={draftDescription}
             onChange={(e) => setDraftDescription(e.target.value)}
             rows={5}
-            placeholder="Describe this subsystem, component, or software item…"
+            placeholder="Describe this item…"
             className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed focus:outline-none focus:border-blue-500 resize-y min-h-[120px]"
           />
         ) : entity.description ? (
@@ -605,7 +650,6 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </ul>
         )}
 
-        {/* Simple compare */}
         {revOptions.length >= 2 && (
           <div className="mt-4 bg-zinc-950/80 border border-zinc-800 rounded-2xl p-4">
             <h5 className="text-xs font-medium text-zinc-400 mb-2">Compare revisions</h5>
@@ -642,7 +686,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <div className="text-zinc-400 mb-1">Rev {compareA}</div>
                   {compareRecords.a ? (
                     <>
-                      <div className={STATUS_STYLE[compareRecords.a.status] + ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'}>
+                      <div
+                        className={
+                          STATUS_STYLE[compareRecords.a.status] +
+                          ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'
+                        }
+                      >
                         {compareRecords.a.status}
                       </div>
                       <p className="text-zinc-300">{compareRecords.a.comment || '—'}</p>
@@ -656,7 +705,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <div className="text-zinc-400 mb-1">Rev {compareB}</div>
                   {compareRecords.b ? (
                     <>
-                      <div className={STATUS_STYLE[compareRecords.b.status] + ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'}>
+                      <div
+                        className={
+                          STATUS_STYLE[compareRecords.b.status] +
+                          ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'
+                        }
+                      >
                         {compareRecords.b.status}
                       </div>
                       <p className="text-zinc-300">{compareRecords.b.comment || '—'}</p>
@@ -726,7 +780,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         <div>
           <div className="flex items-center justify-between gap-3 mb-3">
             <h4 className="text-sm font-medium text-blue-400">
-              Contained Elements ({entity.children?.length || 0})
+              Contained ({entity.children?.length || 0})
             </h4>
             {canAddChild && (
               <button
@@ -742,10 +796,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
 
           {showAddChild && (
             <div className="mb-4 bg-zinc-950 border border-emerald-900/40 rounded-2xl p-4 space-y-3">
-              <p className="text-xs text-zinc-400">
-                Add a component, software item, interface, or integrator under{' '}
-                <span className="text-zinc-200">{entity.name}</span>.
-              </p>
+              <p className="text-xs text-zinc-400">{addChildHint()}</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] text-zinc-500 block mb-1">Name</label>
@@ -760,16 +811,33 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <label className="text-[11px] text-zinc-500 block mb-1">Type</label>
                   <select
                     value={childType}
-                    onChange={(e) => setChildType(e.target.value as AddableChildType)}
+                    onChange={(e) => setChildType(e.target.value as StructuralEntityType)}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="Component">Component</option>
-                    <option value="SoftwareItem">Software</option>
-                    <option value="Interface">Interface</option>
-                    <option value="Capability">Integrator</option>
+                    {allowedChildTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {TYPE_LABEL[t]}
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
+              {childType === 'Element' && (
+                <div>
+                  <label className="text-[11px] text-zinc-500 block mb-1">Element kind</label>
+                  <select
+                    value={childKind}
+                    onChange={(e) => setChildKind(e.target.value as ElementKind)}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                  >
+                    {(Object.keys(ELEMENT_KIND_LABEL) as ElementKind[]).map((k) => (
+                      <option key={k} value={k}>
+                        {ELEMENT_KIND_LABEL[k]}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div>
                 <label className="text-[11px] text-zinc-500 block mb-1">Description (optional)</label>
                 <textarea
@@ -816,14 +884,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      {TYPE_ICON[child.type]}
+                      {entityIcon(child)}
                       <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
                         {c.name}
                       </span>
                       <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
                     </div>
                     <p className="text-xs text-zinc-500 line-clamp-2">
-                      {c.description || TYPE_LABEL[child.type]}
+                      {c.description || entityTypeLabel(child)}
                     </p>
                   </button>
                 );
@@ -841,7 +909,6 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
-      {/* Footer — only Created (last-modified lives in the header now) */}
       <div className="pt-4 border-t border-zinc-800 flex flex-wrap gap-4 text-xs text-zinc-500">
         {entity.createdAt && (
           <span>Created: {new Date(entity.createdAt).toLocaleDateString()}</span>
@@ -887,7 +954,7 @@ const SubsystemOverviewCard: React.FC<{
 
       <div className="flex flex-wrap gap-1.5 mb-3 text-[10px] text-zinc-500">
         <span className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
-          {children.length} elements
+          {children.length} items
         </span>
         {Object.entries(counts).map(([t, n]) => (
           <span key={t} className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
@@ -909,7 +976,7 @@ const SubsystemOverviewCard: React.FC<{
               onClick={() => onOpen(child.id)}
               className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
             >
-              <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
+              <span className="shrink-0 opacity-80">{entityIcon(child)}</span>
               <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
                 {c.name}
               </span>
@@ -977,7 +1044,6 @@ const SystemRegistry: React.FC = () => {
       }
       return null;
     };
-    // Prefer tree node so Contained Elements includes seed + user-added children
     return findInTree(registryTree, selectedId) || allEntities.find((e) => e.id === selectedId) || null;
   }, [selectedId, registryTree, allEntities]);
 
@@ -1138,15 +1204,7 @@ const SystemRegistry: React.FC = () => {
             <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-2">
               <Filter size={14} className="text-zinc-500 shrink-0" />
               {(
-                [
-                  'all',
-                  'System',
-                  'Subsystem',
-                  'Component',
-                  'SoftwareItem',
-                  'Interface',
-                  'Capability',
-                ] as const
+                ['all', 'System', 'Subsystem', 'Component', 'Element'] as const
               ).map((t) => (
                 <button
                   key={t}
@@ -1188,7 +1246,7 @@ const SystemRegistry: React.FC = () => {
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-16 text-center">
                 <Eye className="mx-auto text-zinc-600 mb-4" size={40} />
                 <p className="text-zinc-400">
-                  Select a system, subsystem, or component to view details.
+                  Select a system, subsystem, component, or element to view details.
                 </p>
               </div>
             )}

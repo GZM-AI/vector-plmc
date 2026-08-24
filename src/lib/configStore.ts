@@ -2,14 +2,19 @@
  * Phase 1 config store — cloud-first Registry spine
  * Load: Amplify → localStorage cache → seed
  * Save: localStorage + Amplify (verify when possible)
+ *
+ * Hierarchy (strict four levels):
+ *   System → Subsystem → Component → Element
  */
 import type {
   Baseline,
+  ElementKind,
   ReleaseStatus,
   ResourceEntity,
   RevisionRecord,
   StructuralEntityType,
 } from '../types/plm';
+import { ALLOWED_CHILD_TYPES } from '../types/plm';
 import { ALL_ENTITIES, TAR_TREE } from '../data/tarSeedData';
 import { SEED_REVISION_HISTORY } from '../data/revisionSeed';
 import { SEED_BASELINES } from '../data/baselinesSeed';
@@ -28,10 +33,13 @@ export type EntityOverlay = {
   notes?: string;
 };
 
-export type AddableChildType = Extract<
-  StructuralEntityType,
-  'Component' | 'SoftwareItem' | 'Interface' | 'Capability'
->;
+/**
+ * Types a user may add as a child, depending on parent:
+ * - System    → Subsystem
+ * - Subsystem → Component
+ * - Component → Element
+ */
+export type AddableChildType = StructuralEntityType; // constrained at runtime by ALLOWED_CHILD_TYPES
 
 type StoreState = {
   overlays: Record<string, EntityOverlay>;
@@ -150,6 +158,7 @@ async function pullFromCloud(): Promise<boolean> {
       lastModified: row.lastModified,
       createdAt: row.createdAt,
       children: [],
+      // kind is seed/local-only for now (ExtraEntity Amplify model has no kind field yet)
     }));
 
     const extraHistory: RevisionRecord[] = (rev?.data || []).map((row: any) => ({
@@ -414,21 +423,39 @@ function slugify(name: string): string {
   );
 }
 
+/**
+ * Add a child under parentId, enforcing strict four-level hierarchy:
+ *   System → Subsystem → Component → Element
+ */
 export function addChildEntity(
   parentId: string,
   input: {
     name: string;
-    type: AddableChildType;
+    type: StructuralEntityType;
     description?: string;
     createdBy?: string;
+    /** Required when type === 'Element' */
+    kind?: ElementKind;
   }
 ): ResourceEntity | null {
   const parent = getEntityById(parentId) || ALL_ENTITIES.find((e) => e.id === parentId);
   if (!parent) return null;
-  if (parent.type !== 'System' && parent.type !== 'Subsystem') return null;
+
+  const allowed = ALLOWED_CHILD_TYPES[parent.type] || [];
+  if (!allowed.includes(input.type)) {
+    console.warn(
+      `[configStore] cannot add ${input.type} under ${parent.type} (${parent.id}). Allowed: ${allowed.join(', ') || 'none'}`
+    );
+    return null;
+  }
 
   const name = input.name.trim();
   if (!name) return null;
+
+  if (input.type === 'Element' && !input.kind) {
+    console.warn('[configStore] Element requires a kind');
+    return null;
+  }
 
   const now = new Date().toISOString();
   const by = input.createdBy ?? 'Zedekiah';
@@ -446,6 +473,7 @@ export function addChildEntity(
     lastModified: now,
     modifiedBy: by,
     children: [],
+    ...(input.type === 'Element' && input.kind ? { kind: input.kind } : {}),
   };
 
   state = {
