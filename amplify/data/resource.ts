@@ -2,7 +2,7 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
 /**
  * Vector PLM — Amplify Data
- * MapLayout (zones) + Registry spine + PlanLine (Planning & Cost)
+ * MapLayout + Registry spine + Change Control v1
  * API key auth for small trusted team.
  */
 const schema = a.schema({
@@ -91,21 +91,42 @@ const schema = a.schema({
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
     ]),
 
-  /** Planning & Cost line per Registry entityId */
-  PlanLine: a
+  /**
+   * Change Request (ECR/ECO) — Phase 2 / Change Control v1
+   * Status flow: Draft → Submitted → In Review → Approved|Rejected → Implemented → Closed
+   */
+  ChangeRequest: a
     .model({
-      entityId: a.string().required(),
-      nre: a.float().required(),
-      unitCost: a.float().required(),
-      qty: a.float().required(),
-      leadTimeDays: a.float().required(),
-      confidence: a.string().required(),
-      note: a.string(),
-      status: a.string().required(),
-      startDate: a.string(),
-      endDate: a.string(),
+      id: a.string().required(),
+      title: a.string().required(),
+      summary: a.string(),
+      changeStatus: a.string().required(),
+      impact: a.string(),
+      affectedEntityIdsJson: a.string().required(),
+      requestedBy: a.string(),
+      approversJson: a.string(),
+      linkedRevisionEventIdsJson: a.string(),
+      createdAt: a.string().required(),
+      lastModified: a.string().required(),
+      modifiedBy: a.string(),
     })
-    .identifier(['entityId'])
+    .identifier(['id'])
+    .authorization((allow) => [
+      allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
+    ]),
+
+  /** Immutable audit events for a Change Request (append-only) */
+  ChangeAuditEvent: a
+    .model({
+      id: a.string().required(),
+      changeRequestId: a.string().required(),
+      at: a.string().required(),
+      by: a.string(),
+      action: a.string().required(),
+      detail: a.string(),
+    })
+    .identifier(['id'])
     .authorization((allow) => [
       allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
