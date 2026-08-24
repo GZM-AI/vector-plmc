@@ -12,7 +12,6 @@ import type { Schema } from '../amplify/data/resource'
 
 async function boot() {
   try {
-    // Loaded at runtime from /public so Vite build does not need the file in git at compile time
     const res = await fetch('/amplify_outputs.json')
     if (!res.ok) throw new Error(`amplify_outputs.json HTTP ${res.status}`)
     const outputs = await res.json()
@@ -22,10 +21,9 @@ async function boot() {
     configureHotspotAmplify(client as any)
     configureProductAmplify(client)
     console.log(
-      'PLM Console — Data client authMode: apiKey (MapLayout + Registry spine + PlanLine)'
+      'PLM Console — Data client authMode: apiKey (MapLayout + Registry spine); Documents use userPool'
     )
 
-    // Shared Registry data, then Planning cost lines
     await hydrateConfigStoreFromCloud()
     await ensurePlanningHydrated()
   } catch (err) {

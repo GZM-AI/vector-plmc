@@ -1,3 +1,4 @@
+import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -8,10 +9,15 @@ import {
   Search,
   LogOut,
   Crosshair,
+  Bookmark,
 } from 'lucide-react';
 
 interface SidebarProps {
-  user?: any;
+  user?: {
+    username?: string;
+    userId?: string;
+    signInDetails?: { loginId?: string };
+  };
   signOut?: () => void;
 }
 
@@ -19,6 +25,7 @@ const navItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { path: '/system-architecture', label: 'System Architecture', icon: Crosshair },
   { path: '/system-registry', label: 'System Registry', icon: Box },
+  { path: '/baselines', label: 'Baselines', icon: Bookmark },
   { path: '/planning', label: 'Planning & Cost', icon: CalendarClock },
   { path: '/suppliers', label: 'Suppliers', icon: Factory },
   { path: '/changes', label: 'Change Control', icon: GitBranch },
@@ -32,7 +39,7 @@ const Sidebar: React.FC<SidebarProps> = ({ user, signOut }) => {
     user?.signInDetails?.loginId ||
     user?.username ||
     user?.userId ||
-    'Zedekiah';
+    'User';
 
   return (
     <div className="w-72 bg-zinc-900 border-r border-zinc-800 flex flex-col h-full shrink-0">
@@ -61,60 +68,4 @@ const Sidebar: React.FC<SidebarProps> = ({ user, signOut }) => {
 
       <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
         {navItems.map((item) => {
-          const Icon = item.icon;
-          const isActive = location.pathname === item.path;
-          const disabled = !!item.disabled;
-
-          if (disabled) {
-            return (
-              <div
-                key={item.path}
-                className="flex items-center gap-3 px-4 py-3 rounded-xl text-zinc-600 cursor-not-allowed"
-                title="Coming next"
-              >
-                <Icon className="w-5 h-5" />
-                <span className="text-sm">{item.label}</span>
-              </div>
-            );
-          }
-
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={
-                'flex items-center gap-3 px-4 py-3 rounded-xl transition-all ' +
-                (isActive
-                  ? 'bg-blue-600 text-white font-medium'
-                  : 'hover:bg-zinc-800 text-zinc-400 hover:text-white')
-              }
-            >
-              <Icon className="w-5 h-5" />
-              <span className="text-sm">{item.label}</span>
-            </Link>
-          );
-        })}
-      </nav>
-
-      <div className="p-4 border-t border-zinc-800">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="text-xs text-zinc-500 truncate">Logged in as</p>
-            <p className="text-sm text-zinc-300 truncate">{displayName}</p>
-          </div>
-          {signOut && (
-            <button
-              onClick={signOut}
-              className="p-2 rounded-xl text-zinc-500 hover:text-white hover:bg-zinc-800 transition"
-              title="Sign out"
-            >
-              <LogOut size={16} />
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-export default Sidebar;
+          const Icon = item.
