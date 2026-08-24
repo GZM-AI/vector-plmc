@@ -356,7 +356,7 @@ export async function uploadLocalConfigToCloud(): Promise<{ ok: boolean; message
   };
 }
 
-// ─── Local merge API (same surface as before) ────────────────────────────────
+// ─── Local merge API ─────────────────────────────────────────────────────────
 
 export function applyOverlay(entity: ResourceEntity): ResourceEntity {
   const o = state.overlays[entity.id];

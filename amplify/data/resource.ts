@@ -2,8 +2,10 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
 /**
  * Vector PLM — Amplify Data
- * MapLayout + Registry spine + Change Control v1
- * API key auth for small trusted team.
+ * MapLayout + Registry spine + Change Control + Documents (ITAR-adjacent)
+ *
+ * Document model: authenticated only (no publicApiKey).
+ * Other models keep publicApiKey for current team workflow.
  */
 const schema = a.schema({
   MapLayout: a
@@ -92,8 +94,8 @@ const schema = a.schema({
     ]),
 
   /**
-   * Change Request (ECR/ECO) — Phase 2 / Change Control v1
-   * Status flow: Draft → Submitted → In Review → Approved|Rejected → Implemented → Closed
+   * Change Request (ECR/ECO)
+   * Status: Draft → Submitted → In Review → Approved|Rejected → Implemented → Closed
    */
   ChangeRequest: a
     .model({
@@ -129,6 +131,34 @@ const schema = a.schema({
     .identifier(['id'])
     .authorization((allow) => [
       allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
+    ]),
+
+  /**
+   * Document metadata (ITAR-adjacent)
+   * File bytes: Amplify Storage documents/{documentId}/{fileName}
+   * Auth: authenticated only — no publicApiKey
+   */
+  Document: a
+    .model({
+      id: a.string().required(),
+      name: a.string().required(),
+      kind: a.string().required(),
+      description: a.string(),
+      mimeType: a.string(),
+      sizeBytes: a.integer(),
+      storageKey: a.string(),
+      fileName: a.string(),
+      revision: a.string().required(),
+      status: a.string().required(),
+      classification: a.string(),
+      linkedEntityIdsJson: a.string().required(),
+      createdAt: a.string().required(),
+      lastModified: a.string().required(),
+      modifiedBy: a.string(),
+    })
+    .identifier(['id'])
+    .authorization((allow) => [
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
     ]),
 });

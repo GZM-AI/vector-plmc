@@ -3,9 +3,9 @@
  * Overview | Tree (type filter) | Deep-link ?id=
  * Phase 0: revision + status + attachments
  * Phase 1: revision history timeline + bump revision (configStore)
+ * Documents: ITAR-adjacent Amplify Storage (authenticated only)
  *
- * Hierarchy (strict four levels):
- *   TAR™ (System) → Subsystem → Component → Element (kind)
+ * Hierarchy: System → Subsystem → Component → Element (kind)
  */
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
@@ -38,9 +38,7 @@ import {
   EntityStatus,
   SUBSYSTEM_COLORS,
 } from '../data/tarSeedData';
-import { documentsForEntity } from '../data/documentsSeed';
 import type {
-  Document,
   ElementKind,
   ReleaseStatus,
   RevisionRecord,
@@ -58,6 +56,15 @@ import {
   getMergedAllEntities,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
+import {
+  listDocumentsForEntity,
+  uploadAndAttachDocument,
+  getDocumentDownloadUrl,
+  unlinkDocumentFromEntity,
+  isDocumentAuthReady,
+  type DocKind,
+  type PlmDocument,
+} from '../lib/documentStore';
 
 type ViewMode = 'overview' | 'tree';
 
@@ -75,7 +82,6 @@ const TYPE_LABEL: Record<EntityType, string> = {
   Element: 'Element',
 };
 
-/** Kind-aware icon for Elements (falls back to generic Element icon) */
 function entityIcon(entity: ResourceEntity): React.ReactNode {
   if (entity.type !== 'Element' || !entity.kind) return TYPE_ICON[entity.type];
   switch (entity.kind) {
@@ -104,17 +110,6 @@ const STATUS_STYLE: Record<EntityStatus, string> = {
   'In Review': 'bg-blue-900/60 text-blue-300',
   Released: 'bg-emerald-900/60 text-emerald-300',
   Obsolete: 'bg-red-900/60 text-red-300',
-};
-
-const DOC_KIND_LABEL: Record<string, string> = {
-  spec: 'Spec',
-  drawing: 'Drawing',
-  cad: 'CAD',
-  'test-report': 'Test report',
-  photo: 'Photo',
-  analysis: 'Analysis',
-  procedure: 'Procedure',
-  other: 'Document',
 };
 
 const SUBSYSTEM_ACCENT: Record<string, string> = {
@@ -177,7 +172,9 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   if (search && !matchesSearch && !hasChildren) return null;
 
   const isTypeHit = typeFilter === 'all' || node.type === typeFilter;
-  const visibleChildren = (node.children || []).filter((c) => nodeMatchesTypeFilter(c, typeFilter));
+  const visibleChildren = (node.children || []).filter((c) =>
+    nodeMatchesTypeFilter(c, typeFilter)
+  );
 
   return (
     <div>
@@ -258,11 +255,6 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       ? SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[entity.id] || 'sky'] || 'border-zinc-700'
       : 'border-zinc-700';
 
-  const linkedDocs: Document[] = useMemo(
-    () => documentsForEntity(entity.id),
-    [entity.id]
-  );
-
   const history: RevisionRecord[] = useMemo(
     () => getHistoryForEntity(entity.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,8 +264,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [showBump, setShowBump] = useState(false);
   const [bumpComment, setBumpComment] = useState('');
   const [bumpStatus, setBumpStatus] = useState<ReleaseStatus>('Draft');
-  const [compareA, setCompareA] = useState<string>('');
-  const [compareB, setCompareB] = useState<string>('');
+  const [compareA, setCompareA] = useState('');
+  const [compareB, setCompareB] = useState('');
 
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(entity.name);
@@ -288,10 +280,19 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [childKind, setChildKind] = useState<ElementKind>('hardware');
   const [childDescription, setChildDescription] = useState('');
 
+  // Documents (ITAR-adjacent)
+  const [cloudDocs, setCloudDocs] = useState<PlmDocument[]>([]);
+  const [docsLoading, setDocsLoading] = useState(false);
+  const [authReady, setAuthReady] = useState(false);
+  const [showAttach, setShowAttach] = useState(false);
+  const [attachKind, setAttachKind] = useState<DocKind>('spec');
+  const [attachFile, setAttachFile] = useState<File | null>(null);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachError, setAttachError] = useState<string | null>(null);
+
   const allowedChildTypes = ALLOWED_CHILD_TYPES[entity.type] || [];
   const canAddChild = allowedChildTypes.length > 0;
 
-  // Keep drafts in sync when selecting another entity or overlay updates
   useEffect(() => {
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
@@ -304,7 +305,33 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     const defaults = ALLOWED_CHILD_TYPES[entity.type] || [];
     setChildType(defaults[0] || 'Component');
     setChildKind('hardware');
+    setShowAttach(false);
+    setAttachFile(null);
+    setAttachError(null);
   }, [entity.id, entity.name, entity.description, entity.revision, entity.type]);
+
+  const refreshDocs = async () => {
+    setDocsLoading(true);
+    try {
+      const ready = await isDocumentAuthReady();
+      setAuthReady(ready);
+      if (ready) {
+        setCloudDocs(await listDocumentsForEntity(entity.id));
+      } else {
+        setCloudDocs([]);
+      }
+    } catch (e) {
+      console.error(e);
+      setCloudDocs([]);
+    } finally {
+      setDocsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void refreshDocs();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.id]);
 
   const previewNext = nextRevision(entity.revision);
 
@@ -367,11 +394,44 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     }
   };
 
+  const handleAttach = async () => {
+    if (!attachFile) return;
+    setAttachBusy(true);
+    setAttachError(null);
+    try {
+      await uploadAndAttachDocument({
+        file: attachFile,
+        entityId: entity.id,
+        kind: attachKind,
+      });
+      setShowAttach(false);
+      setAttachFile(null);
+      await refreshDocs();
+    } catch (e: any) {
+      setAttachError(e?.message || String(e));
+    } finally {
+      setAttachBusy(false);
+    }
+  };
+
+  const handleOpenDoc = async (d: PlmDocument) => {
+    if (!d.storageKey) return;
+    const url = await getDocumentDownloadUrl(d.storageKey);
+    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const handleUnlink = async (d: PlmDocument) => {
+    if (!confirm(`Unlink “${d.name}” from this item?`)) return;
+    await unlinkDocumentFromEntity(d.id, entity.id);
+    await refreshDocs();
+  };
+
   const compareRecords = useMemo(() => {
     if (!compareA || !compareB) return null;
-    const a = history.find((r) => r.revision === compareA);
-    const b = history.find((r) => r.revision === compareB);
-    return { a, b };
+    return {
+      a: history.find((r) => r.revision === compareA),
+      b: history.find((r) => r.revision === compareB),
+    };
   }, [history, compareA, compareB]);
 
   const revOptions = useMemo(() => {
@@ -383,7 +443,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const addChildHint = () => {
     if (entity.type === 'System') return 'Add a Subsystem under TAR™.';
     if (entity.type === 'Subsystem') return 'Add a Component under this Subsystem.';
-    if (entity.type === 'Component') return 'Add an Element (hardware, software, interface, integrator, …).';
+    if (entity.type === 'Component')
+      return 'Add an Element (hardware, software, interface, integrator, …).';
     return '';
   };
 
@@ -423,7 +484,6 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </div>
         </div>
 
-        {/* Top-right: ID + formal last-modified stamp */}
         <div className="text-xs text-zinc-500 text-right shrink-0 space-y-2">
           <div>ID: {entity.id}</div>
           {(entity.modifiedBy || entity.lastModified) && (
@@ -597,7 +657,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
-      {/* Phase 1 — Revision history */}
+      {/* Revision history */}
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
           <History size={14} />
@@ -617,9 +677,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
               >
                 <div className="flex flex-col items-center pt-0.5">
                   <span
-                    className={`w-2 h-2 rounded-full ${
-                      idx === 0 ? 'bg-blue-400' : 'bg-zinc-600'
-                    }`}
+                    className={`w-2 h-2 rounded-full ${idx === 0 ? 'bg-blue-400' : 'bg-zinc-600'}`}
                   />
                   {idx < history.length - 1 && (
                     <span className="w-px flex-1 bg-zinc-800 mt-1 min-h-[12px]" />
@@ -638,9 +696,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       <span className="text-[10px] text-zinc-500">by {r.changedBy}</span>
                     )}
                   </div>
-                  {r.comment && (
-                    <p className="text-xs text-zinc-400 mt-1">{r.comment}</p>
-                  )}
+                  {r.comment && <p className="text-xs text-zinc-400 mt-1">{r.comment}</p>}
                   {r.changesSummary && (
                     <p className="text-[11px] text-zinc-600 mt-0.5">{r.changesSummary}</p>
                   )}
@@ -695,10 +751,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                         {compareRecords.a.status}
                       </div>
                       <p className="text-zinc-300">{compareRecords.a.comment || '—'}</p>
-                      <p className="text-zinc-600 mt-1">{compareRecords.a.changesSummary}</p>
                     </>
                   ) : (
-                    <p className="text-zinc-600">No history row (current only)</p>
+                    <p className="text-zinc-600">No history row</p>
                   )}
                 </div>
                 <div className="rounded-xl border border-zinc-800 p-3">
@@ -714,10 +769,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                         {compareRecords.b.status}
                       </div>
                       <p className="text-zinc-300">{compareRecords.b.comment || '—'}</p>
-                      <p className="text-zinc-600 mt-1">{compareRecords.b.changesSummary}</p>
                     </>
                   ) : (
-                    <p className="text-zinc-600">No history row (current only)</p>
+                    <p className="text-zinc-600">No history row</p>
                   )}
                 </div>
               </div>
@@ -726,30 +780,99 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {/* Phase 0 — Attachments */}
+      {/* Attachments — ITAR-adjacent Storage */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-blue-400 flex items-center gap-2">
             <Paperclip size={14} />
-            Attachments ({linkedDocs.length})
+            Attachments ({cloudDocs.length})
           </h4>
           <button
             type="button"
-            disabled
-            title="Upload wiring comes with Amplify Storage (Phase 0 UI shell)"
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-700 text-zinc-500 cursor-not-allowed"
+            onClick={() => setShowAttach((v) => !v)}
+            disabled={!authReady}
+            title={
+              authReady
+                ? 'Upload and link a document'
+                : 'Sign in required (ITAR-adjacent document storage)'
+            }
+            className={
+              'inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border ' +
+              (authReady
+                ? 'bg-zinc-950 border-zinc-600 text-zinc-200 hover:border-blue-500'
+                : 'bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed')
+            }
           >
             <Plus size={12} />
             Attach document
           </button>
         </div>
-        {linkedDocs.length === 0 ? (
+
+        {!authReady && (
+          <p className="text-xs text-amber-400/90 bg-amber-950/20 border border-amber-900/40 rounded-2xl px-4 py-3 mb-3">
+            Sign in required to view or upload documents (authenticated Storage — ITAR-adjacent).
+          </p>
+        )}
+
+        {showAttach && authReady && (
+          <div className="mb-4 bg-zinc-950 border border-blue-900/40 rounded-2xl p-4 space-y-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label className="text-[11px] text-zinc-500 block mb-1">File</label>
+                <input
+                  type="file"
+                  onChange={(e) => setAttachFile(e.target.files?.[0] || null)}
+                  className="w-full text-xs text-zinc-300"
+                />
+              </div>
+              <div>
+                <label className="text-[11px] text-zinc-500 block mb-1">Kind</label>
+                <select
+                  value={attachKind}
+                  onChange={(e) => setAttachKind(e.target.value as DocKind)}
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
+                >
+                  <option value="spec">Spec</option>
+                  <option value="drawing">Drawing</option>
+                  <option value="cad">CAD</option>
+                  <option value="test-report">Test report</option>
+                  <option value="photo">Photo</option>
+                  <option value="analysis">Analysis</option>
+                  <option value="procedure">Procedure</option>
+                  <option value="other">Other</option>
+                </select>
+              </div>
+            </div>
+            {attachError && <p className="text-xs text-red-300">{attachError}</p>}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={handleAttach}
+                disabled={!attachFile || attachBusy}
+                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium disabled:opacity-40"
+              >
+                {attachBusy ? 'Uploading…' : 'Upload & attach'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowAttach(false)}
+                className="px-4 py-2 rounded-xl bg-zinc-800 text-sm text-zinc-300"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {docsLoading ? (
+          <p className="text-xs text-zinc-500">Loading documents…</p>
+        ) : cloudDocs.length === 0 ? (
           <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
             No documents linked yet.
           </p>
         ) : (
           <ul className="space-y-2">
-            {linkedDocs.map((d) => (
+            {cloudDocs.map((d) => (
               <li
                 key={d.id}
                 className="flex items-start gap-3 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3"
@@ -759,16 +882,26 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-white font-medium truncate">{d.name}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-400">
-                      {DOC_KIND_LABEL[d.kind] ?? d.kind}
-                    </span>
-                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLE[d.status]}`}>
-                      {d.status}
+                      {d.kind}
                     </span>
                     <span className="text-[10px] text-zinc-500">Rev {d.revision}</span>
                   </div>
-                  {d.description && (
-                    <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{d.description}</p>
-                  )}
+                  <div className="flex gap-3 mt-2">
+                    <button
+                      type="button"
+                      onClick={() => handleOpenDoc(d)}
+                      className="text-[11px] text-blue-400 hover:text-blue-300"
+                    >
+                      Open
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleUnlink(d)}
+                      className="text-[11px] text-zinc-500 hover:text-red-300"
+                    >
+                      Unlink
+                    </button>
+                  </div>
                 </div>
               </li>
             ))}
@@ -776,6 +909,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
+      {/* Contained children */}
       {(canAddChild || (entity.children && entity.children.length > 0)) && (
         <div>
           <div className="flex items-center justify-between gap-3 mb-3">
@@ -923,7 +1057,8 @@ const SubsystemOverviewCard: React.FC<{
   onOpen: (id: string) => void;
 }> = ({ sub: rawSub, onOpen }) => {
   const sub = applyOverlay(rawSub);
-  const accent = SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
+  const accent =
+    SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
   const children = sub.children || [];
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -943,7 +1078,9 @@ const SubsystemOverviewCard: React.FC<{
               {sub.name}
             </h3>
           </div>
-          <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[sub.status]}`}>
+          <span
+            className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[sub.status]}`}
+          >
             {sub.status}
           </span>
         </div>
@@ -1009,13 +1146,10 @@ const SystemRegistry: React.FC = () => {
   useEffect(() => {
     const id = searchParams.get('id');
     if (!id) return;
-
     const entity = allEntities.find((e) => e.id === id);
     if (!entity) return;
-
     setViewMode('tree');
     setSelectedId(id);
-
     const path: string[] = [];
     let current: ResourceEntity | undefined = entity;
     while (current?.parentId) {
@@ -1044,7 +1178,11 @@ const SystemRegistry: React.FC = () => {
       }
       return null;
     };
-    return findInTree(registryTree, selectedId) || allEntities.find((e) => e.id === selectedId) || null;
+    return (
+      findInTree(registryTree, selectedId) ||
+      allEntities.find((e) => e.id === selectedId) ||
+      null
+    );
   }, [selectedId, registryTree, allEntities]);
 
   const subsystems = useMemo(
@@ -1122,7 +1260,9 @@ const SystemRegistry: React.FC = () => {
               type="button"
               onClick={() => setViewMode('overview')}
               className={`px-4 py-2 rounded-xl text-sm flex items-center gap-2 ${
-                viewMode === 'overview' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
+                viewMode === 'overview'
+                  ? 'bg-blue-600 text-white'
+                  : 'text-zinc-300 hover:bg-zinc-800'
               }`}
             >
               <LayoutGrid size={14} /> Overview
@@ -1203,9 +1343,7 @@ const SystemRegistry: React.FC = () => {
           <div className="xl:col-span-4 bg-zinc-900 border border-zinc-800 rounded-3xl p-5 flex flex-col min-h-[640px]">
             <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-2">
               <Filter size={14} className="text-zinc-500 shrink-0" />
-              {(
-                ['all', 'System', 'Subsystem', 'Component', 'Element'] as const
-              ).map((t) => (
+              {(['all', 'System', 'Subsystem', 'Component', 'Element'] as const).map((t) => (
                 <button
                   key={t}
                   type="button"
