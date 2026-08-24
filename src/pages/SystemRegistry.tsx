@@ -377,9 +377,34 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             </div>
           </div>
         </div>
+
+        {/* ── Top-right: ID + formal last-modified stamp ── */}
         <div className="text-xs text-zinc-500 text-right shrink-0 space-y-2">
           <div>ID: {entity.id}</div>
-          {entity.modifiedBy && <div>By: {entity.modifiedBy}</div>}
+          {(entity.modifiedBy || entity.lastModified) && (
+            <div className="space-y-0.5 text-right">
+              {entity.modifiedBy && (
+                <div>
+                  <span className="text-zinc-600">Modified by</span>{' '}
+                  <span className="text-zinc-300">{entity.modifiedBy}</span>
+                </div>
+              )}
+              {entity.lastModified && (
+                <div>
+                  <span className="text-zinc-600">Last edited</span>{' '}
+                  <span className="text-zinc-300">
+                    {new Date(entity.lastModified).toLocaleString(undefined, {
+                      year: 'numeric',
+                      month: 'short',
+                      day: 'numeric',
+                      hour: 'numeric',
+                      minute: '2-digit',
+                    })}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex flex-col items-end gap-2">
             {!editing ? (
               <button
@@ -816,14 +841,11 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
+      {/* Footer — only Created (last-modified lives in the header now) */}
       <div className="pt-4 border-t border-zinc-800 flex flex-wrap gap-4 text-xs text-zinc-500">
         {entity.createdAt && (
           <span>Created: {new Date(entity.createdAt).toLocaleDateString()}</span>
         )}
-        {entity.lastModified && (
-          <span>Last modified: {new Date(entity.lastModified).toLocaleString()}</span>
-        )}
-        {entity.modifiedBy && <span>By: {entity.modifiedBy}</span>}
       </div>
     </div>
   );
