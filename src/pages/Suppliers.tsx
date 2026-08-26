@@ -44,12 +44,13 @@ function useProductData(): {
       try {
         const mod = await import('../lib/configStore');
         const load = () => {
-          const tree = mod.getRegistryTree();
-          setList(mod.getMergedAllEntities());
+          const all = mod.getMergedAllEntities();
+          setList(all);
           setSubsystems(
-            (tree.children || []).filter(
-              (c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c)
-            )
+            all
+              .filter((c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c))
+              .slice()
+              .sort((a: ResourceEntity, b: ResourceEntity) => a.name.localeCompare(b.name))
           );
         };
         load();
@@ -57,12 +58,13 @@ function useProductData(): {
       } catch {
         try {
           const seed = await import('../data/tarSeedData');
-          setList(seed.ALL_ENTITIES || []);
-          const tree = seed.TAR_TREE;
+          const all = seed.ALL_ENTITIES || [];
+          setList(all);
           setSubsystems(
-            (tree?.children || []).filter(
-              (c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c)
-            )
+            all
+              .filter((c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c))
+              .slice()
+              .sort((a: ResourceEntity, b: ResourceEntity) => a.name.localeCompare(b.name))
           );
         } catch {
           setList([]);
@@ -138,6 +140,36 @@ function componentsUnderSubsystem(sub: ResourceEntity): ResourceEntity[] {
   );
 }
 
+/** Components and elements under a subsystem, using parentId when children are empty. */
+function partsUnderSubsystem(subId: string, list: ResourceEntity[]): ResourceEntity[] {
+  const map = new Map(list.map((e) => [e.id, e]));
+  const under = (e: ResourceEntity): boolean => {
+    const seen = new Set<string>();
+    let cur: ResourceEntity | undefined = e;
+    while (cur?.parentId && !seen.has(cur.id)) {
+      seen.add(cur.id);
+      if (cur.parentId === subId) return true;
+      cur = map.get(cur.parentId);
+    }
+    return false;
+  };
+  return list
+    .filter(
+      (e) =>
+        e.id !== subId &&
+        e.type !== 'System' &&
+        e.type !== 'Subsystem' &&
+        !isIntegratorNode(e) &&
+        under(e)
+    )
+    .sort((a, b) => {
+      const ta = a.type === 'Component' ? 0 : 1;
+      const tb = b.type === 'Component' ? 0 : 1;
+      if (ta !== tb) return ta - tb;
+      return a.name.localeCompare(b.name);
+    });
+}
+
 function integratorNodeUnderSubsystem(sub: ResourceEntity): ResourceEntity | undefined {
   const kids = sub.children || [];
   const named = kids.find((c) => c.name === 'Integration Candidates');
@@ -189,9 +221,12 @@ const Suppliers: React.FC = () => {
   );
 
   const formComponents = useMemo(() => {
+    if (!formSubsystemId) return [] as ResourceEntity[];
+    const fromFlat = partsUnderSubsystem(formSubsystemId, entities);
+    if (fromFlat.length > 0) return fromFlat;
     if (!formSubsystem) return [] as ResourceEntity[];
     return componentsUnderSubsystem(formSubsystem);
-  }, [formSubsystem]);
+  }, [formSubsystem, formSubsystemId, entities]);
 
   const partOptions = useMemo(() => {
     return entities
@@ -482,6 +517,27 @@ const Suppliers: React.FC = () => {
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
                     />
                   </div>
+                  <div className="sm:col-span-2">
+                    <label className="text-[11px] text-zinc-500 block mb-1">
+                      Subsystem (from System Registry)
+                    </label>
+                    <select
+                      value={formSubsystemId}
+                      onChange={(e) => selectSubsystem(e.target.value)}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    >
+                      <option value="">
+                        {subsystems.length === 0
+                          ? 'No subsystems found in System Registry'
+                          : 'Select a subsystem…'}
+                      </option>
+                      {subsystems.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                   <div>
                     <label className="text-[11px] text-zinc-500 block mb-1">Kind</label>
                     <select
@@ -589,7 +645,7 @@ const Suppliers: React.FC = () => {
                         <span className="text-[11px] text-zinc-600 block mt-0.5">
                           {formSubsystemId
                             ? `For ${formSubsystem?.name}`
-                            : 'Select a subsystem below first'}
+                            : 'Select a subsystem first'}
                         </span>
                       </span>
                     </label>
@@ -605,31 +661,11 @@ const Suppliers: React.FC = () => {
                   </div>
 
                   <div className="sm:col-span-2 space-y-3 pt-2 border-t border-zinc-800">
-                    <div>
-                      <label className="text-[11px] text-zinc-500 block mb-1">Subsystem</label>
-                      <select
-                        value={formSubsystemId}
-                        onChange={(e) => selectSubsystem(e.target.value)}
-                        className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                      >
-                        <option value="">Select a subsystem…</option>
-                        {subsystems.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.name}
-                          </option>
-                        ))}
-                      </select>
-                      <p className="text-[11px] text-zinc-600 mt-1">
-                        Saved on this supplier. Check components below if they supply parts in
-                        this branch.
-                      </p>
-                    </div>
-
                     {formSubsystemId && (
                       <div className="space-y-3">
                         <div>
                           <label className="text-[11px] text-zinc-500 block mb-2">
-                            Components in {formSubsystem?.name}
+                            Components and elements in {formSubsystem?.name}
                           </label>
                           <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
                             {formComponents.length === 0 ? (
@@ -651,7 +687,10 @@ const Suppliers: React.FC = () => {
                                       onChange={() => toggleFormEntity(e.id)}
                                       className="mt-1"
                                     />
-                                    <span className="text-sm text-zinc-200">{e.name}</span>
+                                    <span>
+                                      <span className="text-sm text-zinc-200 block">{e.name}</span>
+                                      <span className="text-[10px] text-zinc-600">{e.type}</span>
+                                    </span>
                                   </label>
                                 );
                               })
