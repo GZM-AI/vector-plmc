@@ -29,11 +29,15 @@ export type Supplier = {
   engagement: EngagementStatus;
   risk: SourcingRisk;
   notes?: string;
+  /** Registry entity ids this supplier is candidate/source for */
   entityIds: string[];
+  /** Registry subsystem ids this supplier is scoped to */
+  subsystemIds: string[];
   createdAt: string;
   updatedAt: string;
 };
 
+/** Per–Registry-entity sourcing intent (optional overlay on a part) */
 export type EntitySourcing = {
   entityId: string;
   makeBuy: MakeBuy;
@@ -59,7 +63,11 @@ function load(): StoreState {
     if (!raw) return emptyState();
     const parsed = JSON.parse(raw) as StoreState;
     return {
-      suppliers: parsed.suppliers || [],
+      suppliers: (parsed.suppliers || []).map((s) => ({
+        ...s,
+        entityIds: s.entityIds || [],
+        subsystemIds: s.subsystemIds || [],
+      })),
       entitySourcing: parsed.entitySourcing || {},
     };
   } catch {
@@ -122,6 +130,7 @@ export function upsertSupplier(
         id: existing.id,
         name: input.name.trim(),
         entityIds: input.entityIds ?? existing.entityIds,
+        subsystemIds: input.subsystemIds ?? existing.subsystemIds ?? [],
         updatedAt: now,
       };
       state = {
@@ -147,6 +156,7 @@ export function upsertSupplier(
     risk: input.risk ?? 'Unknown',
     notes: input.notes,
     entityIds: input.entityIds ?? [],
+    subsystemIds: input.subsystemIds ?? [],
     createdAt: now,
     updatedAt: now,
   };

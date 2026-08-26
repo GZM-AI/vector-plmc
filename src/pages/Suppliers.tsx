@@ -1,6 +1,6 @@
 /**
  * Suppliers — vendors, manufacturers, integrators
- * New/Edit: pick Subsystem first, then elements under it.
+ * New/Edit: pick Subsystem, then components. Vertical Integrator is a separate action.
  */
 import React, { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
@@ -111,19 +111,30 @@ const emptyForm = (): Partial<Supplier> & { name: string } => ({
   location: '',
   notes: '',
   entityIds: [],
+  subsystemIds: [],
 });
 
-/** Flatten all descendants under a subsystem for the element checklist */
-function elementsUnderSubsystem(sub: ResourceEntity): ResourceEntity[] {
-  const out: ResourceEntity[] = [];
-  const walk = (n: ResourceEntity) => {
-    for (const c of n.children || []) {
-      out.push(c);
-      if (c.children && c.children.length > 0) walk(c);
-    }
-  };
-  walk(sub);
-  return out;
+type MaybeKind = ResourceEntity & { kind?: string };
+
+function componentsUnderSubsystem(sub: ResourceEntity): ResourceEntity[] {
+  return (sub.children || []).filter((c) => c.type === 'Component');
+}
+
+function integratorNodeUnderSubsystem(sub: ResourceEntity): ResourceEntity | undefined {
+  const kids = sub.children || [];
+  const named = kids.find((c) => c.name === 'Integration Candidates');
+  if (named) return named;
+  const kindOnChild = kids.find((c) => (c as MaybeKind).kind === 'integrator');
+  if (kindOnChild) return kindOnChild;
+  for (const c of kids) {
+    const hit = (c.children || []).find(
+      (e) =>
+        e.type === 'Element' &&
+        ((e as MaybeKind).kind === 'integrator' || /integrator/i.test(e.name))
+    );
+    if (hit) return hit;
+  }
+  return undefined;
 }
 
 const Suppliers: React.FC = () => {
@@ -133,7 +144,6 @@ const Suppliers: React.FC = () => {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(emptyForm());
   const [linkEntityId, setLinkEntityId] = useState('');
-  /** Subsystem chosen on New/Edit form to show its elements */
   const [formSubsystemId, setFormSubsystemId] = useState('');
   const { byId, list: entities, subsystems } = useProductData();
 
@@ -160,9 +170,9 @@ const Suppliers: React.FC = () => {
     [subsystems, formSubsystemId]
   );
 
-  const formElements = useMemo(() => {
+  const formComponents = useMemo(() => {
     if (!formSubsystem) return [] as ResourceEntity[];
-    return elementsUnderSubsystem(formSubsystem);
+    return componentsUnderSubsystem(formSubsystem);
   }, [formSubsystem]);
 
   const partOptions = useMemo(() => {
@@ -184,6 +194,28 @@ const Suppliers: React.FC = () => {
     });
   };
 
+  const selectSubsystem = (id: string) => {
+    setFormSubsystemId(id);
+    if (!id) return;
+    setForm((f) => ({
+      ...f,
+      subsystemIds: Array.from(new Set([...(f.subsystemIds || []), id])),
+    }));
+  };
+
+  const markVerticalIntegrator = () => {
+    if (!formSubsystem) return;
+    const vi = integratorNodeUnderSubsystem(formSubsystem);
+    setForm((f) => ({
+      ...f,
+      kind: 'Integrator',
+      subsystemIds: Array.from(new Set([...(f.subsystemIds || []), formSubsystem.id])),
+      entityIds: vi
+        ? Array.from(new Set([...(f.entityIds || []), vi.id]))
+        : f.entityIds || [],
+    }));
+  };
+
   const startCreate = () => {
     setSelectedId(null);
     setForm(emptyForm());
@@ -193,8 +225,12 @@ const Suppliers: React.FC = () => {
 
   const startEdit = (s: Supplier) => {
     setSelectedId(s.id);
-    setForm({ ...s, entityIds: [...(s.entityIds || [])] });
-    setFormSubsystemId('');
+    setForm({
+      ...s,
+      entityIds: [...(s.entityIds || [])],
+      subsystemIds: [...(s.subsystemIds || [])],
+    });
+    setFormSubsystemId((s.subsystemIds && s.subsystemIds[0]) || '');
     setEditing(true);
   };
 
@@ -205,11 +241,16 @@ const Suppliers: React.FC = () => {
       id: selectedId || undefined,
       name: form.name,
       entityIds: form.entityIds || [],
+      subsystemIds: form.subsystemIds || [],
     });
     setSelectedId(saved.id);
-    setForm({ ...saved, entityIds: [...(saved.entityIds || [])] });
+    setForm({
+      ...saved,
+      entityIds: [...(saved.entityIds || [])],
+      subsystemIds: [...(saved.subsystemIds || [])],
+    });
     setEditing(false);
-    setFormSubsystemId('');
+    setFormSubsystemId((saved.subsystemIds && saved.subsystemIds[0]) || '');
   };
 
   const handleDelete = () => {
@@ -273,9 +314,13 @@ const Suppliers: React.FC = () => {
                   type="button"
                   onClick={() => {
                     setSelectedId(s.id);
-                    setForm({ ...s, entityIds: [...(s.entityIds || [])] });
+                    setForm({
+                      ...s,
+                      entityIds: [...(s.entityIds || [])],
+                      subsystemIds: [...(s.subsystemIds || [])],
+                    });
                     setEditing(false);
-                    setFormSubsystemId('');
+                    setFormSubsystemId((s.subsystemIds && s.subsystemIds[0]) || '');
                   }}
                   className={
                     'w-full text-left px-4 py-3 hover:bg-zinc-800/80 transition ' +
@@ -296,6 +341,13 @@ const Suppliers: React.FC = () => {
                       {s.risk}
                     </span>
                   </div>
+                  {(s.subsystemIds?.length || 0) > 0 && (
+                    <div className="text-[10px] text-zinc-600 mt-1">
+                      {(s.subsystemIds || [])
+                        .map((id) => byId.get(id)?.name || id)
+                        .join(' · ')}
+                    </div>
+                  )}
                   {s.entityIds.length > 0 && (
                     <div className="text-[10px] text-zinc-600 mt-1">
                       {s.entityIds.length} linked part{s.entityIds.length === 1 ? '' : 's'}
@@ -344,9 +396,15 @@ const Suppliers: React.FC = () => {
                         onClick={() => {
                           setEditing(false);
                           if (selected)
-                            setForm({ ...selected, entityIds: [...selected.entityIds] });
+                            setForm({
+                              ...selected,
+                              entityIds: [...selected.entityIds],
+                              subsystemIds: [...(selected.subsystemIds || [])],
+                            });
                           else setForm(emptyForm());
-                          setFormSubsystemId('');
+                          setFormSubsystemId(
+                            (selected?.subsystemIds && selected.subsystemIds[0]) || ''
+                          );
                         }}
                         className="px-3 py-1.5 rounded-xl text-xs bg-zinc-800 text-zinc-300"
                       >
@@ -470,13 +528,12 @@ const Suppliers: React.FC = () => {
                     />
                   </div>
 
-                  {/* Subsystem → then elements */}
                   <div className="sm:col-span-2 space-y-3 pt-2 border-t border-zinc-800">
                     <div>
                       <label className="text-[11px] text-zinc-500 block mb-1">Subsystem</label>
                       <select
                         value={formSubsystemId}
-                        onChange={(e) => setFormSubsystemId(e.target.value)}
+                        onChange={(e) => selectSubsystem(e.target.value)}
                         className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
                       >
                         <option value="">Select a subsystem…</option>
@@ -487,57 +544,63 @@ const Suppliers: React.FC = () => {
                         ))}
                       </select>
                       <p className="text-[11px] text-zinc-600 mt-1">
-                        Same subsystem list as System Registry. After you pick one, choose which
-                        elements this supplier addresses.
+                        Saved on this supplier. Then check components, or mark as a Vertical
+                        Integrator candidate.
                       </p>
                     </div>
 
                     {formSubsystemId && (
-                      <div>
-                        <label className="text-[11px] text-zinc-500 block mb-2">
-                          Elements within {formSubsystem?.name || 'subsystem'}
-                        </label>
-                        <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
-                          {formElements.length === 0 ? (
-                            <p className="p-3 text-xs text-zinc-600">
-                              No elements under this subsystem yet. Add children in System
-                              Registry first.
-                            </p>
-                          ) : (
-                            formElements.map((e) => {
-                              const checked = (form.entityIds || []).includes(e.id);
-                              return (
-                                <label
-                                  key={e.id}
-                                  className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() => toggleFormEntity(e.id)}
-                                    className="mt-1"
-                                  />
-                                  <span className="min-w-0">
-                                    <span className="text-sm text-zinc-200 block truncate">
-                                      {e.name}
-                                    </span>
-                                    <span className="text-[10px] text-zinc-600">{e.type}</span>
-                                  </span>
-                                </label>
-                              );
-                            })
-                          )}
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-[11px] text-zinc-500 block mb-2">
+                            Components in {formSubsystem?.name}
+                          </label>
+                          <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
+                            {formComponents.length === 0 ? (
+                              <p className="p-3 text-xs text-zinc-600">
+                                No components under this subsystem yet. Add them in System
+                                Registry.
+                              </p>
+                            ) : (
+                              formComponents.map((e) => {
+                                const checked = (form.entityIds || []).includes(e.id);
+                                return (
+                                  <label
+                                    key={e.id}
+                                    className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
+                                  >
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={() => toggleFormEntity(e.id)}
+                                      className="mt-1"
+                                    />
+                                    <span className="text-sm text-zinc-200">{e.name}</span>
+                                  </label>
+                                );
+                              })
+                            )}
+                          </div>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={markVerticalIntegrator}
+                          className="w-full px-3 py-2 rounded-xl text-sm bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-blue-500"
+                        >
+                          Set as Vertical Integrator candidate for {formSubsystem?.name}
+                        </button>
+                        <p className="text-[11px] text-zinc-600">
+                          Use this when the company may integrate the whole subsystem — not when
+                          they only sell one component inside it. Sets Kind to Integrator.
+                        </p>
                       </div>
                     )}
 
                     {(form.entityIds?.length || 0) > 0 && (
                       <p className="text-[11px] text-zinc-500">
-                        {form.entityIds!.length} element
-                        {form.entityIds!.length === 1 ? '' : 's'} selected total
-                        {formSubsystemId
-                          ? ' (switch subsystem above to add from another branch)'
-                          : ''}
+                        {form.entityIds!.length} linked item
+                        {form.entityIds!.length === 1 ? '' : 's'} selected
                       </p>
                     )}
                   </div>
@@ -558,6 +621,16 @@ const Suppliers: React.FC = () => {
                         Risk: {selected.risk}
                       </span>
                     </div>
+                    {(selected.subsystemIds || []).length > 0 && (
+                      <div>
+                        <div className="text-[11px] text-zinc-600">Subsystems</div>
+                        <div className="text-zinc-300">
+                          {(selected.subsystemIds || [])
+                            .map((id) => byId.get(id)?.name || id)
+                            .join(', ')}
+                        </div>
+                      </div>
+                    )}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-zinc-400">
                       {selected.location && (
                         <div>
@@ -601,7 +674,8 @@ const Suppliers: React.FC = () => {
 
                   {selected.entityIds.length === 0 ? (
                     <p className="text-xs text-zinc-600">
-                      No parts linked. Use Edit → Subsystem → elements, or link one below.
+                      No parts linked. Use Edit → Subsystem → components, or the Vertical
+                      Integrator button.
                     </p>
                   ) : (
                     <ul className="space-y-2">
