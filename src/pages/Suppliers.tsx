@@ -44,13 +44,11 @@ function useProductData(): {
       try {
         const mod = await import('../lib/configStore');
         const load = () => {
-          const all = mod.getMergedAllEntities();
-          setList(all);
+          const tree = mod.getRegistryTree();
+          setList(mod.getMergedAllEntities());
+          // Same source as System Registry: top-level children of the system tree.
           setSubsystems(
-            all
-              .filter((c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c))
-              .slice()
-              .sort((a: ResourceEntity, b: ResourceEntity) => a.name.localeCompare(b.name))
+            (tree.children || []).filter((c: ResourceEntity) => c.type === 'Subsystem')
           );
         };
         load();
@@ -58,13 +56,10 @@ function useProductData(): {
       } catch {
         try {
           const seed = await import('../data/tarSeedData');
-          const all = seed.ALL_ENTITIES || [];
-          setList(all);
+          setList(seed.ALL_ENTITIES || []);
+          const tree = seed.TAR_TREE;
           setSubsystems(
-            all
-              .filter((c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c))
-              .slice()
-              .sort((a: ResourceEntity, b: ResourceEntity) => a.name.localeCompare(b.name))
+            (tree?.children || []).filter((c: ResourceEntity) => c.type === 'Subsystem')
           );
         } catch {
           setList([]);
@@ -221,12 +216,15 @@ const Suppliers: React.FC = () => {
   );
 
   const formComponents = useMemo(() => {
-    if (!formSubsystemId) return [] as ResourceEntity[];
-    const fromFlat = partsUnderSubsystem(formSubsystemId, entities);
-    if (fromFlat.length > 0) return fromFlat;
     if (!formSubsystem) return [] as ResourceEntity[];
-    return componentsUnderSubsystem(formSubsystem);
-  }, [formSubsystem, formSubsystemId, entities]);
+    const kids = (formSubsystem.children || []).filter(
+      (c) => c.type === 'Component' && !isIntegratorNode(c)
+    );
+    if (kids.length > 0) return kids;
+    return partsUnderSubsystem(formSubsystem.id, entities).filter(
+      (e) => e.type === 'Component'
+    );
+  }, [formSubsystem, entities]);
 
   const partOptions = useMemo(() => {
     return entities
@@ -517,9 +515,31 @@ const Suppliers: React.FC = () => {
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
                     />
                   </div>
+                  <div className="sm:col-span-2 rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3">
+                    <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+                      Linked on this supplier
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-100">
+                      Subsystem:{' '}
+                      {formSubsystem?.name ||
+                        (form.subsystemIds || [])
+                          .map((id) => byId.get(id)?.name || id)
+                          .filter(Boolean)
+                          .join(', ') ||
+                        'None yet'}
+                    </div>
+                    <div className="mt-1 text-sm text-zinc-100">
+                      Components:{' '}
+                      {(form.entityIds || [])
+                        .map((id) => byId.get(id))
+                        .filter((e): e is ResourceEntity => !!e && !isIntegratorNode(e))
+                        .map((e) => e.name)
+                        .join(', ') || 'None yet'}
+                    </div>
+                  </div>
                   <div className="sm:col-span-2">
                     <label className="text-[11px] text-zinc-500 block mb-1">
-                      Subsystem (from System Registry)
+                      Subsystem (same list as System Registry)
                     </label>
                     <select
                       value={formSubsystemId}
@@ -538,6 +558,38 @@ const Suppliers: React.FC = () => {
                       ))}
                     </select>
                   </div>
+                  {formSubsystemId && (
+                    <div className="sm:col-span-2">
+                      <label className="text-[11px] text-zinc-500 block mb-2">
+                        Components in {formSubsystem?.name}
+                      </label>
+                      <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
+                        {formComponents.length === 0 ? (
+                          <p className="p-3 text-xs text-zinc-600">
+                            No components under this subsystem in System Registry.
+                          </p>
+                        ) : (
+                          formComponents.map((e) => {
+                            const checked = (form.entityIds || []).includes(e.id);
+                            return (
+                              <label
+                                key={e.id}
+                                className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleFormEntity(e.id)}
+                                  className="mt-1"
+                                />
+                                <span className="text-sm text-zinc-200">{e.name}</span>
+                              </label>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="text-[11px] text-zinc-500 block mb-1">Kind</label>
                     <select
@@ -658,54 +710,6 @@ const Suppliers: React.FC = () => {
                       rows={3}
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y"
                     />
-                  </div>
-
-                  <div className="sm:col-span-2 space-y-3 pt-2 border-t border-zinc-800">
-                    {formSubsystemId && (
-                      <div className="space-y-3">
-                        <div>
-                          <label className="text-[11px] text-zinc-500 block mb-2">
-                            Components and elements in {formSubsystem?.name}
-                          </label>
-                          <div className="max-h-52 overflow-y-auto bg-zinc-950 border border-zinc-700 rounded-2xl divide-y divide-zinc-800">
-                            {formComponents.length === 0 ? (
-                              <p className="p-3 text-xs text-zinc-600">
-                                No components under this subsystem yet. Add them in System
-                                Registry.
-                              </p>
-                            ) : (
-                              formComponents.map((e) => {
-                                const checked = (form.entityIds || []).includes(e.id);
-                                return (
-                                  <label
-                                    key={e.id}
-                                    className="flex items-start gap-3 px-3 py-2 hover:bg-zinc-900/80 cursor-pointer"
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      checked={checked}
-                                      onChange={() => toggleFormEntity(e.id)}
-                                      className="mt-1"
-                                    />
-                                    <span>
-                                      <span className="text-sm text-zinc-200 block">{e.name}</span>
-                                      <span className="text-[10px] text-zinc-600">{e.type}</span>
-                                    </span>
-                                  </label>
-                                );
-                              })
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {(form.entityIds?.length || 0) > 0 && (
-                      <p className="text-[11px] text-zinc-500">
-                        {form.entityIds!.length} linked item
-                        {form.entityIds!.length === 1 ? '' : 's'} selected
-                      </p>
-                    )}
                   </div>
                 </div>
               ) : (
