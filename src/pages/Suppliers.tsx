@@ -47,7 +47,9 @@ function useProductData(): {
           const tree = mod.getRegistryTree();
           setList(mod.getMergedAllEntities());
           setSubsystems(
-            (tree.children || []).filter((c: ResourceEntity) => c.type === 'Subsystem')
+            (tree.children || []).filter(
+              (c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c)
+            )
           );
         };
         load();
@@ -58,7 +60,9 @@ function useProductData(): {
           setList(seed.ALL_ENTITIES || []);
           const tree = seed.TAR_TREE;
           setSubsystems(
-            (tree?.children || []).filter((c: ResourceEntity) => c.type === 'Subsystem')
+            (tree?.children || []).filter(
+              (c: ResourceEntity) => c.type === 'Subsystem' && !isIntegratorNode(c)
+            )
           );
         } catch {
           setList([]);
@@ -116,8 +120,22 @@ const emptyForm = (): Partial<Supplier> & { name: string } => ({
 
 type MaybeKind = ResourceEntity & { kind?: string };
 
+function isIntegratorNode(e: ResourceEntity): boolean {
+  const kind = (e as MaybeKind).kind;
+  if (kind === 'integrator') return true;
+  const n = (e.name || '').toLowerCase();
+  return (
+    n.includes('vertical integrator') ||
+    n.includes('integration candidate') ||
+    n === 'integrator' ||
+    n.includes('integrators')
+  );
+}
+
 function componentsUnderSubsystem(sub: ResourceEntity): ResourceEntity[] {
-  return (sub.children || []).filter((c) => c.type === 'Component');
+  return (sub.children || []).filter(
+    (c) => c.type === 'Component' && !isIntegratorNode(c)
+  );
 }
 
 function integratorNodeUnderSubsystem(sub: ResourceEntity): ResourceEntity | undefined {
@@ -177,10 +195,26 @@ const Suppliers: React.FC = () => {
 
   const partOptions = useMemo(() => {
     return entities
-      .filter((e) => e.type !== 'System' && e.type !== 'Subsystem')
+      .filter(
+        (e) =>
+          e.type !== 'System' &&
+          e.type !== 'Subsystem' &&
+          !isIntegratorNode(e)
+      )
       .slice()
       .sort((a, b) => a.name.localeCompare(b.name));
   }, [entities]);
+
+  const formViNode = formSubsystem
+    ? integratorNodeUnderSubsystem(formSubsystem)
+    : undefined;
+  const viChecked = !!(
+    formSubsystem &&
+    (formViNode
+      ? (form.entityIds || []).includes(formViNode.id)
+      : form.kind === 'Integrator' &&
+        (form.subsystemIds || []).includes(formSubsystem.id))
+  );
 
   const toggleFormEntity = (entityId: string) => {
     setForm((f) => {
@@ -203,17 +237,31 @@ const Suppliers: React.FC = () => {
     }));
   };
 
-  const markVerticalIntegrator = () => {
+  const toggleVerticalIntegrator = (checked: boolean) => {
     if (!formSubsystem) return;
     const vi = integratorNodeUnderSubsystem(formSubsystem);
-    setForm((f) => ({
-      ...f,
-      kind: 'Integrator',
-      subsystemIds: Array.from(new Set([...(f.subsystemIds || []), formSubsystem.id])),
-      entityIds: vi
-        ? Array.from(new Set([...(f.entityIds || []), vi.id]))
-        : f.entityIds || [],
-    }));
+    setForm((f) => {
+      const subsystemIds = Array.from(
+        new Set([...(f.subsystemIds || []), formSubsystem.id])
+      );
+      if (checked) {
+        return {
+          ...f,
+          kind: 'Integrator',
+          subsystemIds,
+          entityIds: vi
+            ? Array.from(new Set([...(f.entityIds || []), vi.id]))
+            : f.entityIds || [],
+        };
+      }
+      return {
+        ...f,
+        entityIds: vi
+          ? (f.entityIds || []).filter((id) => id !== vi.id)
+          : f.entityIds || [],
+        subsystemIds,
+      };
+    });
   };
 
   const startCreate = () => {
@@ -518,6 +566,34 @@ const Suppliers: React.FC = () => {
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
                     />
                   </div>
+                  <div className="flex items-end">
+                    <label
+                      className={
+                        'flex items-start gap-3 w-full px-3 py-2 rounded-xl border cursor-pointer ' +
+                        (formSubsystemId
+                          ? 'bg-zinc-950 border-zinc-700'
+                          : 'bg-zinc-950/50 border-zinc-800 opacity-60 cursor-not-allowed')
+                      }
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-1"
+                        disabled={!formSubsystemId}
+                        checked={viChecked}
+                        onChange={(e) => toggleVerticalIntegrator(e.target.checked)}
+                      />
+                      <span>
+                        <span className="text-sm text-zinc-200 block">
+                          Vertical Integrator candidate
+                        </span>
+                        <span className="text-[11px] text-zinc-600 block mt-0.5">
+                          {formSubsystemId
+                            ? `For ${formSubsystem?.name}`
+                            : 'Select a subsystem below first'}
+                        </span>
+                      </span>
+                    </label>
+                  </div>
                   <div className="sm:col-span-2">
                     <label className="text-[11px] text-zinc-500 block mb-1">Notes</label>
                     <textarea
@@ -544,8 +620,8 @@ const Suppliers: React.FC = () => {
                         ))}
                       </select>
                       <p className="text-[11px] text-zinc-600 mt-1">
-                        Saved on this supplier. Then check components, or mark as a Vertical
-                        Integrator candidate.
+                        Saved on this supplier. Check components below if they supply parts in
+                        this branch.
                       </p>
                     </div>
 
@@ -582,18 +658,6 @@ const Suppliers: React.FC = () => {
                             )}
                           </div>
                         </div>
-
-                        <button
-                          type="button"
-                          onClick={markVerticalIntegrator}
-                          className="w-full px-3 py-2 rounded-xl text-sm bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-blue-500"
-                        >
-                          Set as Vertical Integrator candidate for {formSubsystem?.name}
-                        </button>
-                        <p className="text-[11px] text-zinc-600">
-                          Use this when the company may integrate the whole subsystem — not when
-                          they only sell one component inside it. Sets Kind to Integrator.
-                        </p>
                       </div>
                     )}
 
@@ -621,16 +685,48 @@ const Suppliers: React.FC = () => {
                         Risk: {selected.risk}
                       </span>
                     </div>
-                    {(selected.subsystemIds || []).length > 0 && (
-                      <div>
-                        <div className="text-[11px] text-zinc-600">Subsystems</div>
-                        <div className="text-zinc-300">
-                          {(selected.subsystemIds || [])
-                            .map((id) => byId.get(id)?.name || id)
-                            .join(', ')}
+                    {(() => {
+                      const subNames = (selected.subsystemIds || []).map(
+                        (id) => byId.get(id)?.name || id
+                      );
+                      const linked = (selected.entityIds || [])
+                        .map((id) => byId.get(id))
+                        .filter(Boolean) as ResourceEntity[];
+                      const viLinked = linked.filter((e) => isIntegratorNode(e));
+                      const componentLinked = linked.filter((e) => !isIntegratorNode(e));
+                      return (
+                        <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 space-y-3">
+                          <div>
+                            <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+                              Subsystem
+                            </div>
+                            <div className="text-zinc-100 mt-0.5">
+                              {subNames.length > 0 ? subNames.join(', ') : 'None selected'}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+                              Components
+                            </div>
+                            {componentLinked.length === 0 ? (
+                              <div className="text-zinc-500 mt-0.5">None linked</div>
+                            ) : (
+                              <ul className="mt-1 space-y-0.5 text-zinc-200">
+                                {componentLinked.map((e) => (
+                                  <li key={e.id}>• {e.name}</li>
+                                ))}
+                              </ul>
+                            )}
+                          </div>
+                          {viLinked.length > 0 || selected.kind === 'Integrator' ? (
+                            <div className="text-xs text-blue-300">
+                              Vertical Integrator candidate
+                              {subNames.length > 0 ? ` · ${subNames.join(', ')}` : ''}
+                            </div>
+                          ) : null}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-zinc-400">
                       {selected.location && (
                         <div>
