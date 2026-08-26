@@ -276,13 +276,7 @@ const PlanningCost: React.FC = () => {
     return tree.children.filter((c) => c.type === 'Subsystem');
   }, [tree]);
 
-  useEffect(() => {
-    // Default: expand all subsystems once tree is known
-    if (subsystems.length && expandedIds.size === 0) {
-      setExpandedIds(new Set(subsystems.map((s) => s.id)));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [subsystems.length]);
+
 
   const allParts = useMemo(() => {
     const list: ResourceEntity[] = [];
