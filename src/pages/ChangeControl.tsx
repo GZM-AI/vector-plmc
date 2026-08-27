@@ -288,13 +288,8 @@ const ChangeControl: React.FC = () => {
             <GitBranch className="text-blue-400" /> Change Control
           </h1>
           <p className="text-zinc-400 mt-1">
-            ECR / ECO workflow · hybrid gating · immutable audit ·{' '}
-            {requests.length} request{requests.length === 1 ? '' : 's'}
-            {cloudHint ? (
-              <span className="text-emerald-500/80 ml-2">· cloud</span>
-            ) : (
-              <span className="text-amber-500/80 ml-2">· local cache</span>
-            )}
+            Formal change requests for TAR™ · {requests.length} request
+            {requests.length === 1 ? '' : 's'}
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -318,9 +313,8 @@ const ChangeControl: React.FC = () => {
       <div className="mb-5 flex items-start gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 px-4 py-3 text-xs text-zinc-400">
         <AlertTriangle size={14} className="text-amber-400 shrink-0 mt-0.5" />
         <span>
-          Hybrid gating: free Registry edits while items are <strong className="text-zinc-300">Draft</strong>.
-          For Released / serious changes, open a formal CR here. Optional: link a bump revision to a CR
-          from System Registry (createChangeRequestFromBump).
+          Draft items can still be edited in System Registry. Use a change request here when a
+          Released item, or any change that should be reviewed, needs a recorded decision.
         </span>
       </div>
 
