@@ -422,18 +422,9 @@ const Suppliers: React.FC = () => {
                       {s.risk}
                     </span>
                   </div>
-                  {(s.subsystemIds?.length || 0) > 0 && (
-                    <div className="text-[10px] text-zinc-600 mt-1">
-                      {(s.subsystemIds || [])
-                        .map((id) => byId.get(id)?.name || id)
-                        .join(' · ')}
-                    </div>
-                  )}
-                  {s.entityIds.length > 0 && (
-                    <div className="text-[10px] text-zinc-600 mt-1">
-                      {s.entityIds.length} linked part{s.entityIds.length === 1 ? '' : 's'}
-                    </div>
-                  )}
+                  {s.notes ? (
+                    <div className="text-[10px] text-zinc-600 mt-1 truncate">{s.notes}</div>
+                  ) : null}
                 </button>
               ))
             )}
@@ -514,28 +505,6 @@ const Suppliers: React.FC = () => {
                       onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                       className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
                     />
-                  </div>
-                  <div className="sm:col-span-2 rounded-2xl border border-zinc-700 bg-zinc-950 px-4 py-3">
-                    <div className="text-[11px] uppercase tracking-wide text-zinc-500">
-                      Linked on this supplier
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-100">
-                      Subsystem:{' '}
-                      {formSubsystem?.name ||
-                        (form.subsystemIds || [])
-                          .map((id) => byId.get(id)?.name || id)
-                          .filter(Boolean)
-                          .join(', ') ||
-                        'None yet'}
-                    </div>
-                    <div className="mt-1 text-sm text-zinc-100">
-                      Components:{' '}
-                      {(form.entityIds || [])
-                        .map((id) => byId.get(id))
-                        .filter((e): e is ResourceEntity => !!e && !isIntegratorNode(e))
-                        .map((e) => e.name)
-                        .join(', ') || 'None yet'}
-                    </div>
                   </div>
                   <div className="sm:col-span-2">
                     <label className="text-[11px] text-zinc-500 block mb-1">
@@ -705,10 +674,36 @@ const Suppliers: React.FC = () => {
                   <div className="sm:col-span-2">
                     <label className="text-[11px] text-zinc-500 block mb-1">Notes</label>
                     <textarea
+                      readOnly
+                      value={[
+                        `Subsystem: ${
+                          formSubsystem?.name ||
+                          (form.subsystemIds || [])
+                            .map((id) => byId.get(id)?.name || id)
+                            .filter(Boolean)
+                            .join(', ') ||
+                          'None'
+                        }`,
+                        `Components: ${
+                          (form.entityIds || [])
+                            .map((id) => byId.get(id))
+                            .filter((e): e is ResourceEntity => !!e && !isIntegratorNode(e))
+                            .map((e) => e.name)
+                            .join(', ') || 'None'
+                        }`,
+                        form.notes ? `\n${form.notes}` : '',
+                      ]
+                        .filter(Boolean)
+                        .join('\n')}
+                      rows={5}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y text-zinc-200"
+                    />
+                    <textarea
                       value={form.notes || ''}
                       onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                      rows={3}
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y"
+                      rows={2}
+                      placeholder="Additional notes…"
+                      className="w-full mt-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm resize-y text-zinc-300"
                     />
                   </div>
                 </div>
