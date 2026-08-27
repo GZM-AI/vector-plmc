@@ -3,9 +3,6 @@
  * Overview | Tree (type filter) | Deep-link ?id=
  * Phase 0: revision + status + attachments
  * Phase 1: revision history timeline + bump revision (configStore)
- * Documents: ITAR-adjacent Amplify Storage (authenticated only)
- *
- * Hierarchy: System → Subsystem → Component → Element (kind)
  */
 import React, { useState, useMemo, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
@@ -30,21 +27,21 @@ import {
   History,
   ArrowUpCircle,
   Bookmark,
-  Wrench,
+  Factory,
 } from 'lucide-react';
+import {
+  getSuppliersForEntity,
+  getSuppliers,
+  subscribeSuppliersStore,
+} from '../lib/suppliersStore';
 import {
   ResourceEntity,
   EntityType,
   EntityStatus,
   SUBSYSTEM_COLORS,
 } from '../data/tarSeedData';
-import type {
-  ElementKind,
-  ReleaseStatus,
-  RevisionRecord,
-  StructuralEntityType,
-} from '../types/plm';
-import { ALLOWED_CHILD_TYPES, ELEMENT_KIND_LABEL } from '../types/plm';
+import { documentsForEntity } from '../data/documentsSeed';
+import type { Document, ReleaseStatus, RevisionRecord } from '../types/plm';
 import {
   applyOverlay,
   bumpEntityRevision,
@@ -54,17 +51,9 @@ import {
   addChildEntity,
   getRegistryTree,
   getMergedAllEntities,
+  type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
-import {
-  listDocumentsForEntity,
-  uploadAndAttachDocument,
-  getDocumentDownloadUrl,
-  unlinkDocumentFromEntity,
-  isDocumentAuthReady,
-  type DocKind,
-  type PlmDocument,
-} from '../lib/documentStore';
 
 type ViewMode = 'overview' | 'tree';
 
@@ -72,44 +61,36 @@ const TYPE_ICON: Record<EntityType, React.ReactNode> = {
   System: <Crosshair size={16} className="text-blue-400" />,
   Subsystem: <Layers size={16} className="text-violet-400" />,
   Component: <Package size={16} className="text-zinc-300" />,
-  Element: <Wrench size={16} className="text-amber-400" />,
+  SoftwareItem: <Cpu size={16} className="text-emerald-400" />,
+  Interface: <GitBranch size={16} className="text-sky-400" />,
+  Capability: <Zap size={16} className="text-amber-400" />,
 };
 
 const TYPE_LABEL: Record<EntityType, string> = {
   System: 'System',
   Subsystem: 'Subsystem',
   Component: 'Component',
-  Element: 'Element',
+  SoftwareItem: 'Software',
+  Interface: 'Interface',
+  Capability: 'Integrator',
 };
-
-function entityIcon(entity: ResourceEntity): React.ReactNode {
-  if (entity.type !== 'Element' || !entity.kind) return TYPE_ICON[entity.type];
-  switch (entity.kind) {
-    case 'software':
-      return <Cpu size={16} className="text-emerald-400" />;
-    case 'interface':
-      return <GitBranch size={16} className="text-sky-400" />;
-    case 'integrator':
-      return <Zap size={16} className="text-amber-400" />;
-    case 'hardware':
-      return <Package size={16} className="text-zinc-300" />;
-    default:
-      return <Wrench size={16} className="text-amber-400" />;
-  }
-}
-
-function entityTypeLabel(entity: ResourceEntity): string {
-  if (entity.type === 'Element' && entity.kind) {
-    return `Element · ${ELEMENT_KIND_LABEL[entity.kind]}`;
-  }
-  return TYPE_LABEL[entity.type];
-}
 
 const STATUS_STYLE: Record<EntityStatus, string> = {
   Draft: 'bg-zinc-700 text-zinc-300',
   'In Review': 'bg-blue-900/60 text-blue-300',
   Released: 'bg-emerald-900/60 text-emerald-300',
   Obsolete: 'bg-red-900/60 text-red-300',
+};
+
+const DOC_KIND_LABEL: Record<string, string> = {
+  spec: 'Spec',
+  drawing: 'Drawing',
+  cad: 'CAD',
+  'test-report': 'Test report',
+  photo: 'Photo',
+  analysis: 'Analysis',
+  procedure: 'Procedure',
+  other: 'Document',
 };
 
 const SUBSYSTEM_ACCENT: Record<string, string> = {
@@ -125,7 +106,6 @@ const SUBSYSTEM_ACCENT: Record<string, string> = {
   yellow: 'border-yellow-500/40 bg-yellow-950/20',
   cyan: 'border-cyan-500/40 bg-cyan-950/20',
   rose: 'border-rose-500/40 bg-rose-950/20',
-  indigo: 'border-indigo-500/40 bg-indigo-950/20',
 };
 
 function nodeMatchesTypeFilter(node: ResourceEntity, typeFilter: EntityType | 'all'): boolean {
@@ -172,9 +152,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   if (search && !matchesSearch && !hasChildren) return null;
 
   const isTypeHit = typeFilter === 'all' || node.type === typeFilter;
-  const visibleChildren = (node.children || []).filter((c) =>
-    nodeMatchesTypeFilter(c, typeFilter)
-  );
+  const visibleChildren = (node.children || []).filter((c) => nodeMatchesTypeFilter(c, typeFilter));
 
   return (
     <div>
@@ -200,7 +178,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         ) : (
           <span className="w-4 shrink-0" />
         )}
-        <span className="shrink-0">{entityIcon(node)}</span>
+        <span className="shrink-0">{TYPE_ICON[node.type]}</span>
         <span
           className={`text-sm truncate flex-1 ${
             isSelected ? 'text-white font-medium' : 'text-zinc-300 group-hover:text-white'
@@ -238,6 +216,61 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   );
 };
 
+/** Read-only sourcing line: suppliers on components; integrator candidate on subsystems. */
+const RegistrySupplierLine: React.FC<{ entity: ResourceEntity }> = ({ entity }) => {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    try {
+      return subscribeSuppliersStore(() => setTick((t) => t + 1));
+    } catch {
+      return undefined;
+    }
+  }, []);
+
+  let partSuppliers: { id: string; name: string }[] = [];
+  let integratorNames: string[] = [];
+  try {
+    partSuppliers = getSuppliersForEntity(entity.id).map((s) => ({ id: s.id, name: s.name }));
+    if (entity.type === 'Subsystem') {
+      integratorNames = getSuppliers()
+        .filter(
+          (s) =>
+            (s.subsystemIds || []).includes(entity.id) &&
+            (s.kind === 'Integrator' ||
+              s.name.toLowerCase().includes('integrator'))
+        )
+        .map((s) => s.name);
+    }
+  } catch {
+    return null;
+  }
+
+  if (entity.type === 'Subsystem') {
+    if (integratorNames.length === 0) return null;
+    return (
+      <div className="mt-2 text-xs text-zinc-400 flex items-center gap-1.5">
+        <Factory size={12} className="text-zinc-500" />
+        Integrator candidate: {integratorNames.join(', ')}
+      </div>
+    );
+  }
+
+  if (entity.type !== 'Component' && entity.type !== 'Element') return null;
+
+  return (
+    <div className="mt-2 text-xs text-zinc-400 flex items-center gap-1.5">
+      <Factory size={12} className="text-zinc-500" />
+      {partSuppliers.length > 0 ? (
+        <span>
+          Supplier: {partSuppliers.map((s) => s.name).join(', ')}
+        </span>
+      ) : (
+        <span className="text-zinc-600">Supplier: Unassigned</span>
+      )}
+    </div>
+  );
+};
+
 interface ComponentCardProps {
   entity: ResourceEntity;
   onSelectRelated?: (id: string) => void;
@@ -255,6 +288,11 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       ? SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[entity.id] || 'sky'] || 'border-zinc-700'
       : 'border-zinc-700';
 
+  const linkedDocs: Document[] = useMemo(
+    () => documentsForEntity(entity.id),
+    [entity.id]
+  );
+
   const history: RevisionRecord[] = useMemo(
     () => getHistoryForEntity(entity.id),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -264,8 +302,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [showBump, setShowBump] = useState(false);
   const [bumpComment, setBumpComment] = useState('');
   const [bumpStatus, setBumpStatus] = useState<ReleaseStatus>('Draft');
-  const [compareA, setCompareA] = useState('');
-  const [compareB, setCompareB] = useState('');
+  const [compareA, setCompareA] = useState<string>('');
+  const [compareB, setCompareB] = useState<string>('');
 
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(entity.name);
@@ -276,23 +314,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
-  const [childType, setChildType] = useState<StructuralEntityType>('Component');
-  const [childKind, setChildKind] = useState<ElementKind>('hardware');
+  const [childType, setChildType] = useState<AddableChildType>('Component');
   const [childDescription, setChildDescription] = useState('');
 
-  // Documents (ITAR-adjacent)
-  const [cloudDocs, setCloudDocs] = useState<PlmDocument[]>([]);
-  const [docsLoading, setDocsLoading] = useState(false);
-  const [authReady, setAuthReady] = useState(false);
-  const [showAttach, setShowAttach] = useState(false);
-  const [attachKind, setAttachKind] = useState<DocKind>('spec');
-  const [attachFile, setAttachFile] = useState<File | null>(null);
-  const [attachBusy, setAttachBusy] = useState(false);
-  const [attachError, setAttachError] = useState<string | null>(null);
+  const canAddChild = entity.type === 'System' || entity.type === 'Subsystem';
 
-  const allowedChildTypes = ALLOWED_CHILD_TYPES[entity.type] || [];
-  const canAddChild = allowedChildTypes.length > 0;
-
+  // Keep drafts in sync when selecting another entity or overlay updates
   useEffect(() => {
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
@@ -302,36 +329,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setShowAddChild(false);
     setChildName('');
     setChildDescription('');
-    const defaults = ALLOWED_CHILD_TYPES[entity.type] || [];
-    setChildType(defaults[0] || 'Component');
-    setChildKind('hardware');
-    setShowAttach(false);
-    setAttachFile(null);
-    setAttachError(null);
-  }, [entity.id, entity.name, entity.description, entity.revision, entity.type]);
-
-  const refreshDocs = async () => {
-    setDocsLoading(true);
-    try {
-      const ready = await isDocumentAuthReady();
-      setAuthReady(ready);
-      if (ready) {
-        setCloudDocs(await listDocumentsForEntity(entity.id));
-      } else {
-        setCloudDocs([]);
-      }
-    } catch (e) {
-      console.error(e);
-      setCloudDocs([]);
-    } finally {
-      setDocsLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    void refreshDocs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity.id]);
+    setChildType('Component');
+  }, [entity.id, entity.name, entity.description, entity.revision]);
 
   const previewNext = nextRevision(entity.revision);
 
@@ -371,7 +370,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     });
     if (updated) {
       setEditing(false);
-      setSaveMsg('Saved. Cloud overlay synced when Amplify is available.');
+      setSaveMsg('Saved on this device. Cloud sync comes next (same pattern as zone map).');
     }
   };
 
@@ -380,58 +379,22 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       name: childName,
       type: childType,
       description: childDescription,
-      kind: childType === 'Element' ? childKind : undefined,
     });
     if (created) {
       setShowAddChild(false);
       setChildName('');
       setChildDescription('');
-      const defaults = ALLOWED_CHILD_TYPES[entity.type] || [];
-      setChildType(defaults[0] || 'Component');
-      setChildKind('hardware');
+      setChildType('Component');
       setSaveMsg(`Added “${created.name}” under ${entity.name}.`);
       onSelectRelated?.(created.id);
     }
   };
 
-  const handleAttach = async () => {
-    if (!attachFile) return;
-    setAttachBusy(true);
-    setAttachError(null);
-    try {
-      await uploadAndAttachDocument({
-        file: attachFile,
-        entityId: entity.id,
-        kind: attachKind,
-      });
-      setShowAttach(false);
-      setAttachFile(null);
-      await refreshDocs();
-    } catch (e: any) {
-      setAttachError(e?.message || String(e));
-    } finally {
-      setAttachBusy(false);
-    }
-  };
-
-  const handleOpenDoc = async (d: PlmDocument) => {
-    if (!d.storageKey) return;
-    const url = await getDocumentDownloadUrl(d.storageKey);
-    if (url) window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const handleUnlink = async (d: PlmDocument) => {
-    if (!confirm(`Unlink “${d.name}” from this item?`)) return;
-    await unlinkDocumentFromEntity(d.id, entity.id);
-    await refreshDocs();
-  };
-
   const compareRecords = useMemo(() => {
     if (!compareA || !compareB) return null;
-    return {
-      a: history.find((r) => r.revision === compareA),
-      b: history.find((r) => r.revision === compareB),
-    };
+    const a = history.find((r) => r.revision === compareA);
+    const b = history.find((r) => r.revision === compareB);
+    return { a, b };
   }, [history, compareA, compareB]);
 
   const revOptions = useMemo(() => {
@@ -440,20 +403,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     return Array.from(set);
   }, [history, entity.revision]);
 
-  const addChildHint = () => {
-    if (entity.type === 'System') return 'Add a Subsystem under TAR™.';
-    if (entity.type === 'Subsystem') return 'Add a Component under this Subsystem.';
-    if (entity.type === 'Component')
-      return 'Add an Element (hardware, software, interface, integrator, …).';
-    return '';
-  };
-
   return (
     <div className={`bg-zinc-900 border ${accent} rounded-3xl p-8 space-y-6`}>
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-zinc-950 border border-zinc-700 flex items-center justify-center shrink-0">
-            {entityIcon(entity)}
+            {TYPE_ICON[entity.type]}
           </div>
           <div className="min-w-0">
             {editing ? (
@@ -467,7 +422,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-                {entityTypeLabel(entity)}
+                {TYPE_LABEL[entity.type]}
               </span>
               <span className={`text-xs px-2.5 py-1 rounded-full ${STATUS_STYLE[entity.status]}`}>
                 {entity.status}
@@ -481,35 +436,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 </span>
               )}
             </div>
+            <RegistrySupplierLine entity={entity} />
           </div>
         </div>
-
         <div className="text-xs text-zinc-500 text-right shrink-0 space-y-2">
           <div>ID: {entity.id}</div>
-          {(entity.modifiedBy || entity.lastModified) && (
-            <div className="space-y-0.5 text-right">
-              {entity.modifiedBy && (
-                <div>
-                  <span className="text-zinc-600">Modified by</span>{' '}
-                  <span className="text-zinc-300">{entity.modifiedBy}</span>
-                </div>
-              )}
-              {entity.lastModified && (
-                <div>
-                  <span className="text-zinc-600">Last edited</span>{' '}
-                  <span className="text-zinc-300">
-                    {new Date(entity.lastModified).toLocaleString(undefined, {
-                      year: 'numeric',
-                      month: 'short',
-                      day: 'numeric',
-                      hour: 'numeric',
-                      minute: '2-digit',
-                    })}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
+          {entity.modifiedBy && <div>By: {entity.modifiedBy}</div>}
           <div className="flex flex-col items-end gap-2">
             {!editing ? (
               <button
@@ -612,7 +544,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             value={draftDescription}
             onChange={(e) => setDraftDescription(e.target.value)}
             rows={5}
-            placeholder="Describe this item…"
+            placeholder="Describe this subsystem, component, or software item…"
             className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed focus:outline-none focus:border-blue-500 resize-y min-h-[120px]"
           />
         ) : entity.description ? (
@@ -657,7 +589,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
-      {/* Revision history */}
+      {/* Phase 1 — Revision history */}
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
           <History size={14} />
@@ -677,7 +609,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
               >
                 <div className="flex flex-col items-center pt-0.5">
                   <span
-                    className={`w-2 h-2 rounded-full ${idx === 0 ? 'bg-blue-400' : 'bg-zinc-600'}`}
+                    className={`w-2 h-2 rounded-full ${
+                      idx === 0 ? 'bg-blue-400' : 'bg-zinc-600'
+                    }`}
                   />
                   {idx < history.length - 1 && (
                     <span className="w-px flex-1 bg-zinc-800 mt-1 min-h-[12px]" />
@@ -696,7 +630,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       <span className="text-[10px] text-zinc-500">by {r.changedBy}</span>
                     )}
                   </div>
-                  {r.comment && <p className="text-xs text-zinc-400 mt-1">{r.comment}</p>}
+                  {r.comment && (
+                    <p className="text-xs text-zinc-400 mt-1">{r.comment}</p>
+                  )}
                   {r.changesSummary && (
                     <p className="text-[11px] text-zinc-600 mt-0.5">{r.changesSummary}</p>
                   )}
@@ -706,6 +642,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </ul>
         )}
 
+        {/* Simple compare */}
         {revOptions.length >= 2 && (
           <div className="mt-4 bg-zinc-950/80 border border-zinc-800 rounded-2xl p-4">
             <h5 className="text-xs font-medium text-zinc-400 mb-2">Compare revisions</h5>
@@ -742,36 +679,28 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <div className="text-zinc-400 mb-1">Rev {compareA}</div>
                   {compareRecords.a ? (
                     <>
-                      <div
-                        className={
-                          STATUS_STYLE[compareRecords.a.status] +
-                          ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'
-                        }
-                      >
+                      <div className={STATUS_STYLE[compareRecords.a.status] + ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'}>
                         {compareRecords.a.status}
                       </div>
                       <p className="text-zinc-300">{compareRecords.a.comment || '—'}</p>
+                      <p className="text-zinc-600 mt-1">{compareRecords.a.changesSummary}</p>
                     </>
                   ) : (
-                    <p className="text-zinc-600">No history row</p>
+                    <p className="text-zinc-600">No history row (current only)</p>
                   )}
                 </div>
                 <div className="rounded-xl border border-zinc-800 p-3">
                   <div className="text-zinc-400 mb-1">Rev {compareB}</div>
                   {compareRecords.b ? (
                     <>
-                      <div
-                        className={
-                          STATUS_STYLE[compareRecords.b.status] +
-                          ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'
-                        }
-                      >
+                      <div className={STATUS_STYLE[compareRecords.b.status] + ' inline-block text-[10px] px-2 py-0.5 rounded-full mb-1'}>
                         {compareRecords.b.status}
                       </div>
                       <p className="text-zinc-300">{compareRecords.b.comment || '—'}</p>
+                      <p className="text-zinc-600 mt-1">{compareRecords.b.changesSummary}</p>
                     </>
                   ) : (
-                    <p className="text-zinc-600">No history row</p>
+                    <p className="text-zinc-600">No history row (current only)</p>
                   )}
                 </div>
               </div>
@@ -780,99 +709,30 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {/* Attachments — ITAR-adjacent Storage */}
+      {/* Phase 0 — Attachments */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-blue-400 flex items-center gap-2">
             <Paperclip size={14} />
-            Attachments ({cloudDocs.length})
+            Attachments ({linkedDocs.length})
           </h4>
           <button
             type="button"
-            onClick={() => setShowAttach((v) => !v)}
-            disabled={!authReady}
-            title={
-              authReady
-                ? 'Upload and link a document'
-                : 'Sign in required (ITAR-adjacent document storage)'
-            }
-            className={
-              'inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border ' +
-              (authReady
-                ? 'bg-zinc-950 border-zinc-600 text-zinc-200 hover:border-blue-500'
-                : 'bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed')
-            }
+            disabled
+            title="Upload wiring comes with Amplify Storage (Phase 0 UI shell)"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-700 text-zinc-500 cursor-not-allowed"
           >
             <Plus size={12} />
             Attach document
           </button>
         </div>
-
-        {!authReady && (
-          <p className="text-xs text-amber-400/90 bg-amber-950/20 border border-amber-900/40 rounded-2xl px-4 py-3 mb-3">
-            Sign in required to view or upload documents (authenticated Storage — ITAR-adjacent).
-          </p>
-        )}
-
-        {showAttach && authReady && (
-          <div className="mb-4 bg-zinc-950 border border-blue-900/40 rounded-2xl p-4 space-y-3">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-[11px] text-zinc-500 block mb-1">File</label>
-                <input
-                  type="file"
-                  onChange={(e) => setAttachFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs text-zinc-300"
-                />
-              </div>
-              <div>
-                <label className="text-[11px] text-zinc-500 block mb-1">Kind</label>
-                <select
-                  value={attachKind}
-                  onChange={(e) => setAttachKind(e.target.value as DocKind)}
-                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm"
-                >
-                  <option value="spec">Spec</option>
-                  <option value="drawing">Drawing</option>
-                  <option value="cad">CAD</option>
-                  <option value="test-report">Test report</option>
-                  <option value="photo">Photo</option>
-                  <option value="analysis">Analysis</option>
-                  <option value="procedure">Procedure</option>
-                  <option value="other">Other</option>
-                </select>
-              </div>
-            </div>
-            {attachError && <p className="text-xs text-red-300">{attachError}</p>}
-            <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={handleAttach}
-                disabled={!attachFile || attachBusy}
-                className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium disabled:opacity-40"
-              >
-                {attachBusy ? 'Uploading…' : 'Upload & attach'}
-              </button>
-              <button
-                type="button"
-                onClick={() => setShowAttach(false)}
-                className="px-4 py-2 rounded-xl bg-zinc-800 text-sm text-zinc-300"
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        )}
-
-        {docsLoading ? (
-          <p className="text-xs text-zinc-500">Loading documents…</p>
-        ) : cloudDocs.length === 0 ? (
+        {linkedDocs.length === 0 ? (
           <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
             No documents linked yet.
           </p>
         ) : (
           <ul className="space-y-2">
-            {cloudDocs.map((d) => (
+            {linkedDocs.map((d) => (
               <li
                 key={d.id}
                 className="flex items-start gap-3 bg-zinc-950 border border-zinc-800 rounded-2xl px-4 py-3"
@@ -882,26 +742,16 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-sm text-white font-medium truncate">{d.name}</span>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-400">
-                      {d.kind}
+                      {DOC_KIND_LABEL[d.kind] ?? d.kind}
+                    </span>
+                    <span className={`text-[10px] px-2 py-0.5 rounded-full ${STATUS_STYLE[d.status]}`}>
+                      {d.status}
                     </span>
                     <span className="text-[10px] text-zinc-500">Rev {d.revision}</span>
                   </div>
-                  <div className="flex gap-3 mt-2">
-                    <button
-                      type="button"
-                      onClick={() => handleOpenDoc(d)}
-                      className="text-[11px] text-blue-400 hover:text-blue-300"
-                    >
-                      Open
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleUnlink(d)}
-                      className="text-[11px] text-zinc-500 hover:text-red-300"
-                    >
-                      Unlink
-                    </button>
-                  </div>
+                  {d.description && (
+                    <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{d.description}</p>
+                  )}
                 </div>
               </li>
             ))}
@@ -909,12 +759,11 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {/* Contained children */}
       {(canAddChild || (entity.children && entity.children.length > 0)) && (
         <div>
           <div className="flex items-center justify-between gap-3 mb-3">
             <h4 className="text-sm font-medium text-blue-400">
-              Contained ({entity.children?.length || 0})
+              Contained Elements ({entity.children?.length || 0})
             </h4>
             {canAddChild && (
               <button
@@ -930,7 +779,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
 
           {showAddChild && (
             <div className="mb-4 bg-zinc-950 border border-emerald-900/40 rounded-2xl p-4 space-y-3">
-              <p className="text-xs text-zinc-400">{addChildHint()}</p>
+              <p className="text-xs text-zinc-400">
+                Add a component, software item, interface, or integrator under{' '}
+                <span className="text-zinc-200">{entity.name}</span>.
+              </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-[11px] text-zinc-500 block mb-1">Name</label>
@@ -945,33 +797,16 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <label className="text-[11px] text-zinc-500 block mb-1">Type</label>
                   <select
                     value={childType}
-                    onChange={(e) => setChildType(e.target.value as StructuralEntityType)}
+                    onChange={(e) => setChildType(e.target.value as AddableChildType)}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                   >
-                    {allowedChildTypes.map((t) => (
-                      <option key={t} value={t}>
-                        {TYPE_LABEL[t]}
-                      </option>
-                    ))}
+                    <option value="Component">Component</option>
+                    <option value="SoftwareItem">Software</option>
+                    <option value="Interface">Interface</option>
+                    <option value="Capability">Integrator</option>
                   </select>
                 </div>
               </div>
-              {childType === 'Element' && (
-                <div>
-                  <label className="text-[11px] text-zinc-500 block mb-1">Element kind</label>
-                  <select
-                    value={childKind}
-                    onChange={(e) => setChildKind(e.target.value as ElementKind)}
-                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
-                  >
-                    {(Object.keys(ELEMENT_KIND_LABEL) as ElementKind[]).map((k) => (
-                      <option key={k} value={k}>
-                        {ELEMENT_KIND_LABEL[k]}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              )}
               <div>
                 <label className="text-[11px] text-zinc-500 block mb-1">Description (optional)</label>
                 <textarea
@@ -1018,14 +853,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
                   >
                     <div className="flex items-center gap-2 mb-1">
-                      {entityIcon(child)}
+                      {TYPE_ICON[child.type]}
                       <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
                         {c.name}
                       </span>
                       <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
                     </div>
                     <p className="text-xs text-zinc-500 line-clamp-2">
-                      {c.description || entityTypeLabel(child)}
+                      {c.description || TYPE_LABEL[child.type]}
                     </p>
                   </button>
                 );
@@ -1047,6 +882,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         {entity.createdAt && (
           <span>Created: {new Date(entity.createdAt).toLocaleDateString()}</span>
         )}
+        {entity.lastModified && (
+          <span>Last modified: {new Date(entity.lastModified).toLocaleString()}</span>
+        )}
+        {entity.modifiedBy && <span>By: {entity.modifiedBy}</span>}
       </div>
     </div>
   );
@@ -1057,8 +896,7 @@ const SubsystemOverviewCard: React.FC<{
   onOpen: (id: string) => void;
 }> = ({ sub: rawSub, onOpen }) => {
   const sub = applyOverlay(rawSub);
-  const accent =
-    SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
+  const accent = SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
   const children = sub.children || [];
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
@@ -1078,9 +916,7 @@ const SubsystemOverviewCard: React.FC<{
               {sub.name}
             </h3>
           </div>
-          <span
-            className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[sub.status]}`}
-          >
+          <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[sub.status]}`}>
             {sub.status}
           </span>
         </div>
@@ -1091,7 +927,7 @@ const SubsystemOverviewCard: React.FC<{
 
       <div className="flex flex-wrap gap-1.5 mb-3 text-[10px] text-zinc-500">
         <span className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
-          {children.length} items
+          {children.length} elements
         </span>
         {Object.entries(counts).map(([t, n]) => (
           <span key={t} className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
@@ -1113,7 +949,7 @@ const SubsystemOverviewCard: React.FC<{
               onClick={() => onOpen(child.id)}
               className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
             >
-              <span className="shrink-0 opacity-80">{entityIcon(child)}</span>
+              <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
               <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
                 {c.name}
               </span>
@@ -1146,10 +982,13 @@ const SystemRegistry: React.FC = () => {
   useEffect(() => {
     const id = searchParams.get('id');
     if (!id) return;
+
     const entity = allEntities.find((e) => e.id === id);
     if (!entity) return;
+
     setViewMode('tree');
     setSelectedId(id);
+
     const path: string[] = [];
     let current: ResourceEntity | undefined = entity;
     while (current?.parentId) {
@@ -1178,11 +1017,8 @@ const SystemRegistry: React.FC = () => {
       }
       return null;
     };
-    return (
-      findInTree(registryTree, selectedId) ||
-      allEntities.find((e) => e.id === selectedId) ||
-      null
-    );
+    // Prefer tree node so Contained Elements includes seed + user-added children
+    return findInTree(registryTree, selectedId) || allEntities.find((e) => e.id === selectedId) || null;
   }, [selectedId, registryTree, allEntities]);
 
   const subsystems = useMemo(
@@ -1260,9 +1096,7 @@ const SystemRegistry: React.FC = () => {
               type="button"
               onClick={() => setViewMode('overview')}
               className={`px-4 py-2 rounded-xl text-sm flex items-center gap-2 ${
-                viewMode === 'overview'
-                  ? 'bg-blue-600 text-white'
-                  : 'text-zinc-300 hover:bg-zinc-800'
+                viewMode === 'overview' ? 'bg-blue-600 text-white' : 'text-zinc-300 hover:bg-zinc-800'
               }`}
             >
               <LayoutGrid size={14} /> Overview
@@ -1343,7 +1177,17 @@ const SystemRegistry: React.FC = () => {
           <div className="xl:col-span-4 bg-zinc-900 border border-zinc-800 rounded-3xl p-5 flex flex-col min-h-[640px]">
             <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-2">
               <Filter size={14} className="text-zinc-500 shrink-0" />
-              {(['all', 'System', 'Subsystem', 'Component', 'Element'] as const).map((t) => (
+              {(
+                [
+                  'all',
+                  'System',
+                  'Subsystem',
+                  'Component',
+                  'SoftwareItem',
+                  'Interface',
+                  'Capability',
+                ] as const
+              ).map((t) => (
                 <button
                   key={t}
                   type="button"
@@ -1384,7 +1228,7 @@ const SystemRegistry: React.FC = () => {
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-16 text-center">
                 <Eye className="mx-auto text-zinc-600 mb-4" size={40} />
                 <p className="text-zinc-400">
-                  Select a system, subsystem, component, or element to view details.
+                  Select a system, subsystem, or component to view details.
                 </p>
               </div>
             )}
