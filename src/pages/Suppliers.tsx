@@ -685,11 +685,12 @@ const Suppliers: React.FC = () => {
                 selected && (
                   <div className="space-y-4 text-sm">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm text-white font-medium mr-2">
+                      <span className="inline-flex items-center px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-sm text-zinc-100">
+                        Subsystem:{' '}
                         {(selected.subsystemIds || [])
                           .map((id) => byId.get(id)?.name || id)
                           .filter(Boolean)
-                          .join(', ') || 'No subsystem'}
+                          .join(', ') || 'None'}
                       </span>
                       <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 border border-zinc-700">
                         {selected.kind}
