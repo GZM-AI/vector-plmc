@@ -674,43 +674,23 @@ const Suppliers: React.FC = () => {
                   <div className="sm:col-span-2">
                     <label className="text-[11px] text-zinc-500 block mb-1">Notes</label>
                     <textarea
-                      readOnly
-                      value={[
-                        `Subsystem: ${
-                          formSubsystem?.name ||
-                          (form.subsystemIds || [])
-                            .map((id) => byId.get(id)?.name || id)
-                            .filter(Boolean)
-                            .join(', ') ||
-                          'None'
-                        }`,
-                        `Components: ${
-                          (form.entityIds || [])
-                            .map((id) => byId.get(id))
-                            .filter((e): e is ResourceEntity => !!e && !isIntegratorNode(e))
-                            .map((e) => e.name)
-                            .join(', ') || 'None'
-                        }`,
-                        form.notes ? `\n${form.notes}` : '',
-                      ]
-                        .filter(Boolean)
-                        .join('\n')}
-                      rows={5}
-                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y text-zinc-200"
-                    />
-                    <textarea
                       value={form.notes || ''}
                       onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-                      rows={2}
-                      placeholder="Additional notes…"
-                      className="w-full mt-2 bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm resize-y text-zinc-300"
+                      rows={4}
+                      className="w-full bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-2 text-sm resize-y"
                     />
                   </div>
                 </div>
               ) : (
                 selected && (
                   <div className="space-y-4 text-sm">
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-white font-medium mr-2">
+                        {(selected.subsystemIds || [])
+                          .map((id) => byId.get(id)?.name || id)
+                          .filter(Boolean)
+                          .join(', ') || 'No subsystem'}
+                      </span>
                       <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 border border-zinc-700">
                         {selected.kind}
                       </span>
@@ -723,48 +703,16 @@ const Suppliers: React.FC = () => {
                         Risk: {selected.risk}
                       </span>
                     </div>
-                    {(() => {
-                      const subNames = (selected.subsystemIds || []).map(
-                        (id) => byId.get(id)?.name || id
-                      );
-                      const linked = (selected.entityIds || [])
-                        .map((id) => byId.get(id))
-                        .filter(Boolean) as ResourceEntity[];
-                      const viLinked = linked.filter((e) => isIntegratorNode(e));
-                      const componentLinked = linked.filter((e) => !isIntegratorNode(e));
-                      return (
-                        <div className="rounded-2xl border border-zinc-800 bg-zinc-950 px-4 py-3 space-y-3">
-                          <div>
-                            <div className="text-[11px] uppercase tracking-wide text-zinc-500">
-                              Subsystem
-                            </div>
-                            <div className="text-zinc-100 mt-0.5">
-                              {subNames.length > 0 ? subNames.join(', ') : 'None selected'}
-                            </div>
-                          </div>
-                          <div>
-                            <div className="text-[11px] uppercase tracking-wide text-zinc-500">
-                              Components
-                            </div>
-                            {componentLinked.length === 0 ? (
-                              <div className="text-zinc-500 mt-0.5">None linked</div>
-                            ) : (
-                              <ul className="mt-1 space-y-0.5 text-zinc-200">
-                                {componentLinked.map((e) => (
-                                  <li key={e.id}>• {e.name}</li>
-                                ))}
-                              </ul>
-                            )}
-                          </div>
-                          {viLinked.length > 0 || selected.kind === 'Integrator' ? (
-                            <div className="text-xs text-blue-300">
-                              Vertical Integrator candidate
-                              {subNames.length > 0 ? ` · ${subNames.join(', ')}` : ''}
-                            </div>
-                          ) : null}
-                        </div>
-                      );
-                    })()}
+                    <div>
+                      <div className="text-[11px] text-zinc-600 mb-1">Notes</div>
+                      <textarea
+                        readOnly
+                        value={selected.notes || ''}
+                        rows={4}
+                        placeholder="No notes"
+                        className="w-full bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-zinc-300 resize-y"
+                      />
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-zinc-400">
                       {selected.location && (
                         <div>
@@ -793,9 +741,6 @@ const Suppliers: React.FC = () => {
                         </div>
                       )}
                     </div>
-                    {selected.notes && (
-                      <p className="text-zinc-300 whitespace-pre-wrap">{selected.notes}</p>
-                    )}
                   </div>
                 )
               )}
