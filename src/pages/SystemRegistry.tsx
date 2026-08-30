@@ -28,7 +28,9 @@ import {
   ArrowUpCircle,
   Bookmark,
   Factory,
+  ChevronUp,
 } from 'lucide-react';
+import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childOrderStore';
 import {
   getSuppliersForEntity,
   getSuppliers,
@@ -897,7 +899,7 @@ const SubsystemOverviewCard: React.FC<{
 }> = ({ sub: rawSub, onOpen }) => {
   const sub = applyOverlay(rawSub);
   const accent = SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
-  const children = sub.children || [];
+  const children = sortChildren(sub.id, sub.children || []);
   const counts = useMemo(() => {
     const c: Record<string, number> = {};
     children.forEach((ch) => {
@@ -940,22 +942,62 @@ const SubsystemOverviewCard: React.FC<{
       </div>
 
       <div className="flex-1 space-y-1.5 min-h-0">
-        {children.map((child) => {
+        {children.map((child, index) => {
           const c = applyOverlay(child);
           return (
-            <button
+            <div
               key={child.id}
-              type="button"
-              onClick={() => onOpen(child.id)}
-              className="w-full text-left flex items-center gap-2 px-2.5 py-2 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
+              className="w-full flex items-center gap-1 px-1 py-1 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
             >
-              <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
-              <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
-                {c.name}
-              </span>
-              <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
-              <ChevronRight size={12} className="text-zinc-600 shrink-0" />
-            </button>
+              <div className="flex flex-col shrink-0">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  title="Move up"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveChild(
+                      sub.id,
+                      children.map((ch) => ch.id),
+                      child.id,
+                      -1
+                    );
+                  }}
+                  className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                >
+                  <ChevronUp size={12} />
+                </button>
+                <button
+                  type="button"
+                  disabled={index === children.length - 1}
+                  title="Move down"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    moveChild(
+                      sub.id,
+                      children.map((ch) => ch.id),
+                      child.id,
+                      1
+                    );
+                  }}
+                  className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => onOpen(child.id)}
+                className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
+              >
+                <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
+                <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
+                  {c.name}
+                </span>
+                <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
+                <ChevronRight size={12} className="text-zinc-600 shrink-0" />
+              </button>
+            </div>
           );
         })}
       </div>
@@ -977,7 +1019,14 @@ const SystemRegistry: React.FC = () => {
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<EntityType | 'all'>('all');
 
-  useEffect(() => subscribeConfigStore(() => setHistoryTick((t) => t + 1)), []);
+  useEffect(() => {
+    const unsubConfig = subscribeConfigStore(() => setHistoryTick((t) => t + 1));
+    const unsubOrder = subscribeChildOrderStore(() => setHistoryTick((t) => t + 1));
+    return () => {
+      unsubConfig();
+      unsubOrder();
+    };
+  }, []);
 
   useEffect(() => {
     const id = searchParams.get('id');

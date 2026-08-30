@@ -20,6 +20,7 @@ import { SEED_REVISION_HISTORY } from '../data/revisionSeed';
 import { SEED_BASELINES } from '../data/baselinesSeed';
 import { makeRevisionRecord, nextRevision, sortHistoryNewestFirst } from './revisionUtils';
 import { getProductClient } from './productAmplify';
+import { sortChildren } from './childOrderStore';
 
 const STORAGE_KEY = 'vector-plm-config-v1';
 
@@ -388,7 +389,7 @@ export function getRegistryTree(): ResourceEntity {
       .map((e) => inject(e));
     const seen = new Set(seedChildren.map((c) => c.id));
     const children = [...seedChildren, ...extrasHere.filter((c) => !seen.has(c.id))];
-    return { ...base, children };
+    return { ...base, children: sortChildren(node.id, children) };
   };
   return inject(TAR_TREE);
 }
