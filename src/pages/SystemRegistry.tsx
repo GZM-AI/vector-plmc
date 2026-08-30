@@ -154,7 +154,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   if (search && !matchesSearch && !hasChildren) return null;
 
   const isTypeHit = typeFilter === 'all' || node.type === typeFilter;
-  const visibleChildren = (node.children || []).filter((c) => nodeMatchesTypeFilter(c, typeFilter));
+  const visibleChildren = sortChildren(
+    node.id,
+    (node.children || []).filter((c) => nodeMatchesTypeFilter(c, typeFilter))
+  );
 
   return (
     <div>
@@ -279,12 +282,35 @@ interface ComponentCardProps {
   historyTick?: number;
 }
 
+function findNodeById(node: ResourceEntity, id: string): ResourceEntity | null {
+  if (node.id === id) return node;
+  for (const c of node.children || []) {
+    const found = findNodeById(c, id);
+    if (found) return found;
+  }
+  return null;
+}
+
 const ComponentCard: React.FC<ComponentCardProps> = ({
   entity: rawEntity,
   onSelectRelated,
   historyTick = 0,
 }) => {
   const entity = applyOverlay(rawEntity);
+  const siblingGroup = useMemo(() => {
+    if (!entity.parentId) return [] as ResourceEntity[];
+    const tree = getRegistryTree();
+    const parent = findNodeById(tree, entity.parentId);
+    if (!parent) return [] as ResourceEntity[];
+    return sortChildren(parent.id, parent.children || []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.id, entity.parentId, historyTick]);
+  const siblingIndex = siblingGroup.findIndex((s) => s.id === entity.id);
+  const systemChildren = useMemo(() => {
+    if (entity.type !== 'System') return [] as ResourceEntity[];
+    return sortChildren(entity.id, entity.children || []).filter((c) => c.type === 'Subsystem');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entity.id, entity.type, entity.children, historyTick]);
   const accent =
     entity.type === 'Subsystem'
       ? SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[entity.id] || 'sky'] || 'border-zinc-700'
@@ -486,6 +512,98 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       {saveMsg && (
         <div className="text-xs text-emerald-300/90 bg-emerald-950/30 border border-emerald-800/40 rounded-xl px-3 py-2">
           {saveMsg}
+        </div>
+      )}
+
+      {editing && entity.type === 'Subsystem' && entity.parentId && siblingGroup.length > 1 && (
+        <div className="bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500 mb-2">
+            Display order among subsystems
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm text-zinc-200">
+              Position {siblingIndex + 1} of {siblingGroup.length}
+            </span>
+            <button
+              type="button"
+              disabled={siblingIndex <= 0}
+              onClick={() =>
+                moveChild(
+                  entity.parentId!,
+                  siblingGroup.map((s) => s.id),
+                  entity.id,
+                  -1
+                )
+              }
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs bg-zinc-800 border border-zinc-600 text-zinc-200 disabled:opacity-30"
+            >
+              <ChevronUp size={12} /> Move earlier
+            </button>
+            <button
+              type="button"
+              disabled={siblingIndex < 0 || siblingIndex >= siblingGroup.length - 1}
+              onClick={() =>
+                moveChild(
+                  entity.parentId!,
+                  siblingGroup.map((s) => s.id),
+                  entity.id,
+                  1
+                )
+              }
+              className="inline-flex items-center gap-1 px-3 py-1.5 rounded-xl text-xs bg-zinc-800 border border-zinc-600 text-zinc-200 disabled:opacity-30"
+            >
+              <ChevronDown size={12} /> Move later
+            </button>
+          </div>
+        </div>
+      )}
+
+      {editing && entity.type === 'System' && systemChildren.length > 1 && (
+        <div className="bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 space-y-2">
+          <div className="text-[11px] uppercase tracking-wide text-zinc-500">
+            Subsystem display order
+          </div>
+          {systemChildren.map((child, index) => (
+            <div
+              key={child.id}
+              className="flex items-center gap-2 px-2 py-1.5 rounded-xl bg-zinc-900 border border-zinc-800"
+            >
+              <div className="flex flex-col">
+                <button
+                  type="button"
+                  disabled={index === 0}
+                  onClick={() =>
+                    moveChild(
+                      entity.id,
+                      systemChildren.map((s) => s.id),
+                      child.id,
+                      -1
+                    )
+                  }
+                  className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                >
+                  <ChevronUp size={12} />
+                </button>
+                <button
+                  type="button"
+                  disabled={index === systemChildren.length - 1}
+                  onClick={() =>
+                    moveChild(
+                      entity.id,
+                      systemChildren.map((s) => s.id),
+                      child.id,
+                      1
+                    )
+                  }
+                  className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                >
+                  <ChevronDown size={12} />
+                </button>
+              </div>
+              <span className="text-[11px] text-zinc-600 w-5">{index + 1}</span>
+              <span className="text-sm text-zinc-200 truncate">{applyOverlay(child).name}</span>
+            </div>
+          ))}
         </div>
       )}
 
