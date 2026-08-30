@@ -3,6 +3,11 @@ import { Link } from 'react-router-dom';
 import { Box, Crosshair, Layers, ChevronRight, X, Move, Save, Cloud } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES } from '../data/tarSeedData';
 import {
+  getRegistryTree,
+  getMergedAllEntities,
+  subscribeConfigStore,
+} from '../lib/configStore';
+import {
   type Hotspot,
   DEFAULT_HOTSPOTS,
   loadHotspotLayout,
@@ -43,6 +48,7 @@ const SystemArchitecture: React.FC = () => {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [treeTick, setTreeTick] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const editModeRef = useRef(editMode);
@@ -59,7 +65,36 @@ const SystemArchitecture: React.FC = () => {
 
   editModeRef.current = editMode;
 
-  // Load shared layout once on mount (cloud → local cache → defaults)
+  useEffect(() => subscribeConfigStore(() => setTreeTick((t) => t + 1)), []);
+
+  const productTree = useMemo(() => {
+    try {
+      return getRegistryTree();
+    } catch {
+      return TAR_TREE;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeTick]);
+
+  const allEntities = useMemo(() => {
+    try {
+      return getMergedAllEntities();
+    } catch {
+      return ALL_ENTITIES || [];
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [treeTick]);
+
+  const labelFor = useCallback(
+    (id: string, fallback?: string) => {
+      const fromTree = findInTree(productTree, id);
+      if (fromTree?.name) return fromTree.name;
+      const fromList = allEntities.find((e: any) => e.id === id);
+      return fromList?.name || fallback || id;
+    },
+    [productTree, allEntities]
+  );
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -74,7 +109,6 @@ const SystemArchitecture: React.FC = () => {
     };
   }, []);
 
-  // Drag handlers (draft only — does not publish)
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const drag = dragRef.current;
@@ -115,14 +149,18 @@ const SystemArchitecture: React.FC = () => {
   }, []);
 
   const subsystems = useMemo(
-    () => (TAR_TREE?.children || []).filter((c: any) => c.type === 'Subsystem'),
-    []
+    () => (productTree?.children || []).filter((c: any) => c.type === 'Subsystem'),
+    [productTree]
   );
 
   const active = useMemo(() => {
     if (!activeId) return null;
-    return findInTree(TAR_TREE, activeId) || ALL_ENTITIES?.find((e: any) => e.id === activeId) || null;
-  }, [activeId]);
+    return (
+      findInTree(productTree, activeId) ||
+      allEntities.find((e: any) => e.id === activeId) ||
+      null
+    );
+  }, [activeId, productTree, allEntities]);
 
   const visibleHotspots = useMemo(() => {
     if (showZones) return hotspots;
@@ -214,7 +252,7 @@ const SystemArchitecture: React.FC = () => {
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
               : showZones
-                ? `TAR™ · ${hotspots.length} zones · ${sourceLabel}`
+                ? `TAR™ · ${subsystems.length} subsystems · ${hotspots.length} zones · ${sourceLabel}`
                 : `TAR™ · Zones hidden · ${sourceLabel}`}
           </p>
         </div>
@@ -275,7 +313,8 @@ const SystemArchitecture: React.FC = () => {
         <div className="mb-4 px-4 py-3 rounded-2xl bg-amber-500/15 border border-amber-500/40 text-amber-200 text-sm flex flex-wrap items-center gap-3">
           <span>
             Edit mode is ON. Drag colored boxes; use the white corner to resize. Click{' '}
-            <strong>Save layout</strong> to publish for every device.
+            <strong>Save layout</strong> to publish for every device. Zone positions stay
+            here; names and children come from System Registry.
           </span>
           {saveMessage && (
             <span className="inline-flex items-center gap-1.5 text-emerald-300">
@@ -324,7 +363,7 @@ const SystemArchitecture: React.FC = () => {
                 }}
               >
                 <div className="m-1 text-[10px] sm:text-[11px] leading-tight bg-black/80 text-white px-1.5 py-0.5 rounded pointer-events-none max-w-[95%] truncate">
-                  {h.label}
+                  {labelFor(h.id, h.label)}
                 </div>
                 {editMode && (
                   <div
@@ -350,7 +389,7 @@ const SystemArchitecture: React.FC = () => {
                 }
                 style={{ borderColor: h.color, color: h.color }}
               >
-                {h.label}
+                {labelFor(h.id, h.label)}
               </button>
             ))}
           </div>
@@ -367,6 +406,12 @@ const SystemArchitecture: React.FC = () => {
                   <div>
                     <p className="text-[10px] uppercase tracking-wider text-zinc-500">Subsystem</p>
                     <h2 className="text-lg font-semibold leading-snug">{active.name}</h2>
+                    {active.revision && (
+                      <p className="text-[10px] text-zinc-500 mt-0.5">
+                        Rev {active.revision}
+                        {active.status ? ` · ${active.status}` : ''}
+                      </p>
+                    )}
                   </div>
                 </div>
                 <button
@@ -408,6 +453,11 @@ const SystemArchitecture: React.FC = () => {
                     )}
                   </Link>
                 ))}
+                {(!active.children || active.children.length === 0) && (
+                  <p className="text-xs text-zinc-600">
+                    No components yet. Add them in System Registry.
+                  </p>
+                )}
               </div>
             </div>
           ) : (
