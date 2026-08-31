@@ -29,6 +29,7 @@ import {
   Bookmark,
   Factory,
   ChevronUp,
+  Trash2,
 } from 'lucide-react';
 import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childOrderStore';
 import {
@@ -51,6 +52,7 @@ import {
   subscribeConfigStore,
   updateEntityFields,
   addChildEntity,
+  removeChildEntity,
   getRegistryTree,
   getMergedAllEntities,
   type AddableChildType,
@@ -344,6 +346,13 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [childName, setChildName] = useState('');
   const [childType, setChildType] = useState<AddableChildType>('Component');
   const [childDescription, setChildDescription] = useState('');
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
+
+  const canRemoveSelf =
+    entity.type === 'Component' ||
+    entity.type === 'SoftwareItem' ||
+    entity.type === 'Interface' ||
+    entity.type === 'Capability';
 
   const canAddChild = entity.type === 'System' || entity.type === 'Subsystem';
 
@@ -358,6 +367,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setChildName('');
     setChildDescription('');
     setChildType('Component');
+    setPendingRemoveId(null);
   }, [entity.id, entity.name, entity.description, entity.revision]);
 
   const previewNext = nextRevision(entity.revision);
@@ -415,6 +425,18 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       setChildType('Component');
       setSaveMsg(`Added “${created.name}” under ${entity.name}.`);
       onSelectRelated?.(created.id);
+    }
+  };
+
+  const handleRemove = (id: string, parentId?: string) => {
+    const removed = removeChildEntity(id);
+    setPendingRemoveId(null);
+    if (removed) {
+      setSaveMsg(`Removed “${removed.name}”.`);
+      if (id === entity.id) {
+        const next = parentId || entity.parentId;
+        if (next) onSelectRelated?.(next);
+      }
     }
   };
 
@@ -505,9 +527,45 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
               <ArrowUpCircle size={12} />
               Bump revision
             </button>
+            {canRemoveSelf && pendingRemoveId !== entity.id && (
+              <button
+                type="button"
+                onClick={() => setPendingRemoveId(entity.id)}
+                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-red-950/40 border border-red-800/60 text-red-300 hover:bg-red-900/50"
+              >
+                <Trash2 size={12} />
+                Remove
+              </button>
+            )}
           </div>
         </div>
       </div>
+
+      {canRemoveSelf && pendingRemoveId === entity.id && (
+        <div className="bg-red-950/30 border border-red-800/50 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-red-200">
+            Remove <span className="font-medium text-white">{entity.name}</span> from this
+            subsystem? It disappears from Registry and Architecture. Seed items can be restored
+            only by clearing the removal list.
+          </p>
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => handleRemove(entity.id, entity.parentId)}
+              className="px-3 py-1.5 rounded-xl bg-red-600 text-white text-xs font-medium hover:bg-red-500"
+            >
+              Confirm remove
+            </button>
+            <button
+              type="button"
+              onClick={() => setPendingRemoveId(null)}
+              className="px-3 py-1.5 rounded-xl bg-zinc-800 text-zinc-300 text-xs"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {saveMsg && (
         <div className="text-xs text-emerald-300/90 bg-emerald-950/30 border border-emerald-800/40 rounded-xl px-3 py-2">
@@ -966,23 +1024,64 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {entity.children.map((child) => {
                 const c = applyOverlay(child);
+                const childRemovable =
+                  child.type === 'Component' ||
+                  child.type === 'SoftwareItem' ||
+                  child.type === 'Interface' ||
+                  child.type === 'Capability';
                 return (
-                  <button
+                  <div
                     key={child.id}
-                    onClick={() => onSelectRelated?.(child.id)}
-                    className="text-left bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
+                    className="bg-zinc-950 border border-zinc-800 hover:border-blue-600 rounded-2xl p-4 transition group"
                   >
-                    <div className="flex items-center gap-2 mb-1">
-                      {TYPE_ICON[child.type]}
-                      <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
-                        {c.name}
-                      </span>
-                      <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
-                    </div>
-                    <p className="text-xs text-zinc-500 line-clamp-2">
-                      {c.description || TYPE_LABEL[child.type]}
-                    </p>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => onSelectRelated?.(child.id)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {TYPE_ICON[child.type]}
+                        <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
+                          {c.name}
+                        </span>
+                        <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
+                      </div>
+                      <p className="text-xs text-zinc-500 line-clamp-2">
+                        {c.description || TYPE_LABEL[child.type]}
+                      </p>
+                    </button>
+                    {childRemovable && (
+                      <div className="mt-2 flex items-center justify-end">
+                        {pendingRemoveId === child.id ? (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => handleRemove(child.id, entity.id)}
+                              className="text-[11px] px-2.5 py-1 rounded-lg bg-red-600 text-white"
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setPendingRemoveId(null)}
+                              className="text-[11px] px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setPendingRemoveId(child.id)}
+                            className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-red-300"
+                          >
+                            <Trash2 size={11} />
+                            Remove
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -1115,6 +1214,28 @@ const SubsystemOverviewCard: React.FC<{
                 <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
                 <ChevronRight size={12} className="text-zinc-600 shrink-0" />
               </button>
+              {(child.type === 'Component' ||
+                child.type === 'SoftwareItem' ||
+                child.type === 'Interface' ||
+                child.type === 'Capability') && (
+                <button
+                  type="button"
+                  title="Remove from subsystem"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (
+                      window.confirm(
+                        `Remove “${c.name}” from ${sub.name}? It will leave Registry and Architecture.`
+                      )
+                    ) {
+                      removeChildEntity(child.id);
+                    }
+                  }}
+                  className="p-1.5 text-zinc-600 hover:text-red-300 shrink-0"
+                >
+                  <Trash2 size={12} />
+                </button>
+              )}
             </div>
           );
         })}
