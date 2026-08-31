@@ -35,6 +35,14 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
 }
 
+/** Direct children shown inside a zone — skip Vertical Integrators to keep the overlay readable. */
+function zoneComponents(node: any): { id: string; name: string }[] {
+  if (!node?.children?.length) return [];
+  return node.children
+    .filter((c: any) => c && c.name && c.name !== 'Vertical Integrators')
+    .map((c: any) => ({ id: c.id, name: c.name }));
+}
+
 const SystemArchitecture: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [showZones, setShowZones] = useState(false);
@@ -344,37 +352,54 @@ const SystemArchitecture: React.FC = () => {
               draggable={false}
             />
 
-            {visibleHotspots.map((h) => (
-              <div
-                key={h.id}
-                onMouseDown={(e) => beginMove(e, h)}
-                className={
-                  'absolute rounded-xl border-2 flex items-start ' +
-                  (activeId === h.id ? ' outline outline-2 outline-white z-20' : ' z-10') +
-                  (editMode ? ' cursor-move' : ' cursor-pointer')
-                }
-                style={{
-                  left: `${h.left}%`,
-                  top: `${h.top}%`,
-                  width: `${h.width}%`,
-                  height: `${h.height}%`,
-                  borderColor: h.color,
-                  backgroundColor: hexToRgba(h.color, 0.35),
-                }}
-              >
-                <div className="m-1 text-[10px] sm:text-[11px] leading-tight bg-black/80 text-white px-1.5 py-0.5 rounded pointer-events-none max-w-[95%] truncate">
-                  {labelFor(h.id, h.label)}
+            {visibleHotspots.map((h) => {
+              const zoneNode = findInTree(productTree, h.id);
+              const components = zoneComponents(zoneNode);
+              return (
+                <div
+                  key={h.id}
+                  onMouseDown={(e) => beginMove(e, h)}
+                  className={
+                    'absolute rounded-xl border-2 flex flex-col items-stretch overflow-hidden ' +
+                    (activeId === h.id ? ' outline outline-2 outline-white z-20' : ' z-10') +
+                    (editMode ? ' cursor-move' : ' cursor-pointer')
+                  }
+                  style={{
+                    left: `${h.left}%`,
+                    top: `${h.top}%`,
+                    width: `${h.width}%`,
+                    height: `${h.height}%`,
+                    borderColor: h.color,
+                    backgroundColor: hexToRgba(h.color, 0.35),
+                  }}
+                >
+                  <div className="m-1 mb-0.5 text-[10px] sm:text-[11px] font-semibold leading-tight bg-black/80 text-white px-1.5 py-0.5 rounded pointer-events-none self-start max-w-[95%] truncate">
+                    {labelFor(h.id, h.label)}
+                  </div>
+                  {components.length > 0 && (
+                    <ul className="px-1.5 pb-1 pt-0.5 space-y-px overflow-hidden pointer-events-none flex-1 min-h-0">
+                      {components.map((c) => (
+                        <li
+                          key={c.id}
+                          className="text-[8px] sm:text-[9px] leading-tight text-white/95 truncate drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)]"
+                          title={c.name}
+                        >
+                          {c.name}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {editMode && (
+                    <div
+                      onMouseDown={(e) => beginResize(e, h)}
+                      className="absolute bottom-0 right-0 w-6 h-6 bg-white cursor-se-resize z-30 pointer-events-auto"
+                      style={{ borderTopLeftRadius: 6 }}
+                      title="Resize"
+                    />
+                  )}
                 </div>
-                {editMode && (
-                  <div
-                    onMouseDown={(e) => beginResize(e, h)}
-                    className="absolute bottom-0 right-0 w-6 h-6 bg-white cursor-se-resize z-30"
-                    style={{ borderTopLeftRadius: 6 }}
-                    title="Resize"
-                  />
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
 
           <div className="mt-5 flex flex-wrap gap-2">
