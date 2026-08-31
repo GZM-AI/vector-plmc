@@ -47,8 +47,14 @@ type StoreState = {
   extraEntities: ResourceEntity[];
   extraHistory: RevisionRecord[];
   extraBaselines: Baseline[];
+  removedIds: string[];
   cloudHydrated: boolean;
 };
+
+/** Reserved ProductOverlay row — persists seed-entity removals without a new Amplify model. */
+export const REMOVED_IDS_OVERLAY_ID = '__vector_removed_ids__';
+
+const REMOVABLE_CHILD_TYPES = new Set<StructuralEntityType>(['Component', 'Element']);
 
 function emptyState(): StoreState {
   return {
@@ -56,6 +62,7 @@ function emptyState(): StoreState {
     extraEntities: [],
     extraHistory: [],
     extraBaselines: [],
+    removedIds: [],
     cloudHydrated: false,
   };
 }
@@ -70,6 +77,9 @@ function loadLocal(): StoreState {
       extraEntities: parsed.extraEntities || [],
       extraHistory: parsed.extraHistory || [],
       extraBaselines: parsed.extraBaselines || [],
+      removedIds: Array.isArray((parsed as StoreState).removedIds)
+        ? (parsed as StoreState).removedIds
+        : [],
       cloudHydrated: false,
     };
   } catch {
@@ -134,8 +144,18 @@ async function pullFromCloud(): Promise<boolean> {
     }
 
     const overlays: Record<string, EntityOverlay> = {};
+    let removedIds: string[] = [];
     for (const row of ov?.data || []) {
       if (!row?.entityId) continue;
+      if (row.entityId === REMOVED_IDS_OVERLAY_ID) {
+        try {
+          const parsed = JSON.parse(row.notes || '[]');
+          if (Array.isArray(parsed)) removedIds = parsed.filter((x: unknown) => typeof x === 'string');
+        } catch {
+          removedIds = [];
+        }
+        continue;
+      }
       overlays[row.entityId] = {
         revision: row.revision || 'A',
         status: (row.status as ReleaseStatus) || 'Draft',
@@ -187,9 +207,10 @@ async function pullFromCloud(): Promise<boolean> {
 
     state = {
       overlays,
-      extraEntities,
+      extraEntities: extraEntities.filter((e) => !removedIds.includes(e.id)),
       extraHistory,
       extraBaselines,
+      removedIds,
       cloudHydrated: true,
     };
     saveLocal(state);
@@ -277,6 +298,33 @@ async function upsertExtraEntityCloud(entity: ResourceEntity): Promise<boolean> 
   }
 }
 
+async function deleteExtraEntityCloud(id: string): Promise<boolean> {
+  const client = getProductClient();
+  if (!client?.models?.ExtraEntity) return false;
+  try {
+    const result = await client.models.ExtraEntity.delete({ id });
+    if (hasErrors(result)) {
+      console.error('[configStore] extraEntity cloud delete failed', result?.errors);
+      return false;
+    }
+    console.log('[configStore] extraEntity cloud deleted', id);
+    return true;
+  } catch (err) {
+    console.error('[configStore] extraEntity cloud delete error', err);
+    return false;
+  }
+}
+
+function persistRemovedIdsCloud(): void {
+  void upsertOverlayCloud(REMOVED_IDS_OVERLAY_ID, {
+    revision: 'A',
+    status: 'Draft',
+    lastModified: new Date().toISOString(),
+    modifiedBy: 'Zedekiah',
+    notes: JSON.stringify(state.removedIds || []),
+  });
+}
+
 async function createRevisionEventCloud(record: RevisionRecord): Promise<boolean> {
   const client = getProductClient();
   if (!client?.models?.RevisionEvent) return false;
@@ -341,6 +389,14 @@ export async function uploadLocalConfigToCloud(): Promise<{ ok: boolean; message
   for (const [id, o] of Object.entries(state.overlays)) {
     (await upsertOverlayCloud(id, o)) ? ok++ : fail++;
   }
+  (await upsertOverlayCloud(REMOVED_IDS_OVERLAY_ID, {
+    revision: 'A',
+    status: 'Draft',
+    lastModified: new Date().toISOString(),
+    notes: JSON.stringify(state.removedIds || []),
+  }))
+    ? ok++
+    : fail++;
   for (const e of state.extraEntities) {
     (await upsertExtraEntityCloud(e)) ? ok++ : fail++;
   }
@@ -374,18 +430,26 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
   } as ResourceEntity & { notes?: string };
 }
 
+function isRemoved(id: string): boolean {
+  return (state.removedIds || []).includes(id);
+}
+
 export function getMergedAllEntities(): ResourceEntity[] {
   const seedIds = new Set(ALL_ENTITIES.map((e) => e.id));
-  const extras = state.extraEntities.filter((e) => !seedIds.has(e.id));
-  return [...ALL_ENTITIES, ...extras].map((e) => applyOverlay(e));
+  const extras = state.extraEntities.filter((e) => !seedIds.has(e.id) && !isRemoved(e.id));
+  return [...ALL_ENTITIES, ...extras]
+    .filter((e) => !isRemoved(e.id))
+    .map((e) => applyOverlay(e));
 }
 
 export function getRegistryTree(): ResourceEntity {
   const inject = (node: ResourceEntity): ResourceEntity => {
     const base = applyOverlay(node);
-    const seedChildren = (node.children || []).map(inject);
+    const seedChildren = (node.children || [])
+      .filter((c) => !isRemoved(c.id))
+      .map(inject);
     const extrasHere = state.extraEntities
-      .filter((e) => e.parentId === node.id)
+      .filter((e) => e.parentId === node.id && !isRemoved(e.id))
       .map((e) => inject(e));
     const seen = new Set(seedChildren.map((c) => c.id));
     const children = [...seedChildren, ...extrasHere.filter((c) => !seen.has(c.id))];
@@ -485,6 +549,50 @@ export function addChildEntity(
   notify();
   void upsertExtraEntityCloud(entity);
   return applyOverlay(entity);
+}
+
+function collectSubtreeIds(rootId: string): string[] {
+  const ids: string[] = [];
+  const walkMerged = (id: string) => {
+    ids.push(id);
+    for (const e of [...ALL_ENTITIES, ...state.extraEntities]) {
+      if (e.parentId === id && !ids.includes(e.id)) walkMerged(e.id);
+    }
+  };
+  walkMerged(rootId);
+  return ids;
+}
+
+/**
+ * Remove a constituent under a subsystem (Component / Element / Software / Interface / Integrator).
+ * Seed nodes are hidden via removedIds; user-added ExtraEntity rows are deleted.
+ * System and Subsystem cannot be removed here.
+ */
+export function removeChildEntity(entityId: string): ResourceEntity | null {
+  const current = getEntityById(entityId);
+  if (!current) return null;
+  if (current.type === 'System' || current.type === 'Subsystem') return null;
+  if (!REMOVABLE_CHILD_TYPES.has(current.type)) return null;
+
+  const ids = collectSubtreeIds(entityId);
+  const extraSet = new Set(state.extraEntities.map((e) => e.id));
+  const extrasToDelete = ids.filter((id) => extraSet.has(id));
+
+  state = {
+    ...state,
+    extraEntities: state.extraEntities.filter((e) => !ids.includes(e.id)),
+    overlays: Object.fromEntries(
+      Object.entries(state.overlays).filter(([id]) => !ids.includes(id))
+    ),
+    removedIds: Array.from(new Set([...(state.removedIds || []), ...ids])),
+  };
+  saveLocal(state);
+  notify();
+  persistRemovedIdsCloud();
+  extrasToDelete.forEach((id) => {
+    void deleteExtraEntityCloud(id);
+  });
+  return current;
 }
 
 export function updateEntityFields(
