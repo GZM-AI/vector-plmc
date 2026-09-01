@@ -45,7 +45,7 @@ function zoneComponents(node: any): { id: string; name: string }[] {
 
 const SystemArchitecture: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [showZones, setShowZones] = useState(false);
+  const [loadedIds, setLoadedIds] = useState<string[]>([]);
   const [editMode, setEditMode] = useState(false);
   const [hotspots, setHotspots] = useState<Hotspot[]>(() =>
     DEFAULT_HOTSPOTS.map((h) => ({ ...h }))
@@ -170,11 +170,12 @@ const SystemArchitecture: React.FC = () => {
     );
   }, [activeId, productTree, allEntities]);
 
+  const loadedSet = useMemo(() => new Set(loadedIds), [loadedIds]);
+
   const visibleHotspots = useMemo(() => {
-    if (showZones) return hotspots;
-    if (activeId) return hotspots.filter((h) => h.id === activeId);
-    return [];
-  }, [showZones, hotspots, activeId]);
+    if (editMode) return hotspots;
+    return hotspots.filter((h) => loadedSet.has(h.id));
+  }, [editMode, hotspots, loadedSet]);
 
   const beginMove = (e: React.MouseEvent, h: Hotspot) => {
     e.preventDefault();
@@ -209,7 +210,29 @@ const SystemArchitecture: React.FC = () => {
     };
   };
 
-  const selectSubsystem = (id: string) => setActiveId(id);
+  const selectSubsystem = (id: string) => {
+    setActiveId(id);
+    setLoadedIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  const toggleZone = (id: string) => {
+    setLoadedIds((prev) => {
+      if (prev.includes(id)) {
+        const next = prev.filter((x) => x !== id);
+        setActiveId((cur) => (cur === id ? next[0] ?? null : cur));
+        return next;
+      }
+      setActiveId(id);
+      return [...prev, id];
+    });
+  };
+
+  const showAllZones = () => setLoadedIds(hotspots.map((h) => h.id));
+
+  const hideAllZones = () => {
+    setLoadedIds([]);
+    setActiveId(null);
+  };
 
   const resetZones = () => {
     const next = resetHotspotLayoutLocal();
@@ -259,9 +282,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : showZones
-                ? `TAR™ · ${subsystems.length} subsystems · ${hotspots.length} zones · ${sourceLabel}`
-                : `TAR™ · Zones hidden · ${sourceLabel}`}
+              : `TAR™ · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel}`}
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -303,10 +324,23 @@ const SystemArchitecture: React.FC = () => {
           )}
           <button
             type="button"
-            onClick={() => setShowZones((v) => !v)}
+            onClick={showAllZones}
             className="px-4 py-2 rounded-xl text-sm bg-zinc-900 border border-zinc-700 text-zinc-300"
           >
-            {showZones ? 'Hide zones' : 'Show all zones'}
+            Show all zones
+          </button>
+          <button
+            type="button"
+            onClick={hideAllZones}
+            disabled={loadedIds.length === 0 && !editMode}
+            className={
+              'px-4 py-2 rounded-xl text-sm border ' +
+              (loadedIds.length === 0
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
+                : 'bg-zinc-900 border-zinc-700 text-zinc-300')
+            }
+          >
+            Hide all zones
           </button>
           <Link
             to="/system-registry"
@@ -402,21 +436,34 @@ const SystemArchitecture: React.FC = () => {
             })}
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            {hotspots.map((h) => (
-              <button
-                key={h.id}
-                type="button"
-                onClick={() => selectSubsystem(h.id)}
-                className={
-                  'text-xs px-3 py-1.5 rounded-full border transition bg-zinc-950 ' +
-                  (activeId === h.id ? 'ring-2 ring-white' : '')
-                }
-                style={{ borderColor: h.color, color: h.color }}
-              >
-                {labelFor(h.id, h.label)}
-              </button>
-            ))}
+          <p className="mt-4 text-[11px] text-zinc-500">
+            Click a subsystem to load or remove its zone. Several zones can sit on the map at
+            once. White ring = selected for the panel.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {hotspots.map((h) => {
+              const onMap = loadedSet.has(h.id);
+              return (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => toggleZone(h.id)}
+                  title={onMap ? 'Remove zone from map' : 'Load zone onto map'}
+                  className={
+                    'text-xs px-3 py-1.5 rounded-full border transition ' +
+                    (activeId === h.id ? 'ring-2 ring-white ' : '') +
+                    (onMap ? 'text-black font-medium' : 'bg-zinc-950')
+                  }
+                  style={
+                    onMap
+                      ? { borderColor: h.color, backgroundColor: h.color, color: '#111' }
+                      : { borderColor: h.color, color: h.color }
+                  }
+                >
+                  {labelFor(h.id, h.label)}
+                </button>
+              );
+            })}
           </div>
         </div>
 
