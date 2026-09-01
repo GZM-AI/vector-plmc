@@ -381,7 +381,7 @@ const SystemArchitecture: React.FC = () => {
                       {components.map((c) => (
                         <li
                           key={c.id}
-                          className="text-[8px] sm:text-[9px] leading-tight text-white/95 truncate drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)]"
+                          className="text-[10px] sm:text-[11px] leading-tight text-white/95 truncate drop-shadow-[0_1px_1px_rgba(0,0,0,0.85)]"
                           title={c.name}
                         >
                           {c.name}
