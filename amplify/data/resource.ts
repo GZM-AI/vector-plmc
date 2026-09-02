@@ -2,7 +2,7 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
 /**
  * Vector PLM — Amplify Data
- * MapLayout + Registry spine + Change Control + Documents (ITAR-adjacent)
+ * MapLayout + Registry spine + Change Control + Documents + Suppliers
  *
  * Document model: authenticated only (no publicApiKey).
  * Other models keep publicApiKey for current team workflow.
@@ -159,6 +159,46 @@ const schema = a.schema({
     })
     .identifier(['id'])
     .authorization((allow) => [
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
+    ]),
+
+  /** Team-shared supplier / vendor / manufacturer / integrator */
+  SupplierRecord: a
+    .model({
+      id: a.string().required(),
+      name: a.string().required(),
+      kind: a.string().required(),
+      website: a.string(),
+      contactName: a.string(),
+      contactEmail: a.string(),
+      contactPhone: a.string(),
+      location: a.string(),
+      engagement: a.string().required(),
+      risk: a.string().required(),
+      notes: a.string(),
+      entityIdsJson: a.string().required(),
+      subsystemIdsJson: a.string().required(),
+      createdAt: a.string().required(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(['id'])
+    .authorization((allow) => [
+      allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
+    ]),
+
+  /** Per-Registry-entity make/buy overlay */
+  EntitySourcingRecord: a
+    .model({
+      entityId: a.string().required(),
+      makeBuy: a.string().required(),
+      preferredSupplierId: a.string(),
+      notes: a.string(),
+      updatedAt: a.string().required(),
+    })
+    .identifier(['entityId'])
+    .authorization((allow) => [
+      allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
     ]),
 });

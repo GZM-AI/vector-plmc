@@ -8,6 +8,7 @@ import { configureHotspotAmplify } from './lib/hotspotLayoutStore'
 import { configureProductAmplify } from './lib/productAmplify'
 import { hydrateConfigStoreFromCloud } from './lib/configStore'
 import { ensurePlanningHydrated } from './lib/planningStore'
+import { hydrateSuppliersStoreFromCloud } from './lib/suppliersStore'
 import type { Schema } from '../amplify/data/resource'
 
 async function boot() {
@@ -21,11 +22,12 @@ async function boot() {
     configureHotspotAmplify(client as any)
     configureProductAmplify(client)
     console.log(
-      'PLM Console — Data client authMode: apiKey (MapLayout + Registry spine); Documents use userPool'
+      'PLM Console — Data client authMode: apiKey (MapLayout + Registry spine + Suppliers); Documents use userPool'
     )
 
     await hydrateConfigStoreFromCloud()
     await ensurePlanningHydrated()
+    await hydrateSuppliersStoreFromCloud()
   } catch (err) {
     console.warn(
       'PLM Console — Amplify not fully configured; app will use local cache only.',
