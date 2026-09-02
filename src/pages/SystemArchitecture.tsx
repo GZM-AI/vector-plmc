@@ -450,10 +450,10 @@ const SystemArchitecture: React.FC = () => {
             })}
           </div>
 
-          <p className="mt-3 text-[10px] text-zinc-500">
+          <p className="mt-3 text-[11px] text-zinc-500">
             Click a chip to load it. Click again (or the ×) to remove it. Several can be on at once.
           </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
+          <div className="mt-2 flex flex-wrap gap-2">
             {hotspots.map((h) => {
               const onMap = loadedSet.has(h.id);
               return (
@@ -463,7 +463,7 @@ const SystemArchitecture: React.FC = () => {
                   onClick={() => toggleZone(h.id)}
                   title={onMap ? 'Remove zone from map' : 'Load zone onto map'}
                   className={
-                    'inline-flex items-center gap-1 text-[10px] leading-none px-2 py-1 rounded-full border ' +
+                    'inline-flex items-center gap-1.5 text-[12px] leading-none px-2.5 py-1.5 rounded-full border ' +
                     (activeId === h.id ? 'ring-1 ring-white ' : '')
                   }
                   style={
@@ -472,10 +472,10 @@ const SystemArchitecture: React.FC = () => {
                       : { borderColor: h.color, color: h.color, backgroundColor: 'transparent' }
                   }
                 >
-                  <span className="truncate max-w-[9.5rem]">{labelFor(h.id, h.label)}</span>
+                  <span className="truncate max-w-[11rem]">{labelFor(h.id, h.label)}</span>
                   {onMap && (
                     <span
-                      className="inline-flex w-3 h-3 items-center justify-center rounded-full bg-black/40 text-white"
+                      className="inline-flex w-3.5 h-3.5 items-center justify-center rounded-full bg-black/40 text-white text-[10px]"
                       aria-hidden
                     >
                       ×
