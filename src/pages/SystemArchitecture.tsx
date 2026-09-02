@@ -161,6 +161,16 @@ const SystemArchitecture: React.FC = () => {
     [productTree]
   );
 
+  /** Chips follow Registry / right-menu subsystem order, not raw hotspot layout order. */
+  const orderedHotspots = useMemo(() => {
+    const rank = new Map(subsystems.map((s: any, i: number) => [s.id, i]));
+    return [...hotspots].sort((a, b) => {
+      const ia = rank.has(a.id) ? (rank.get(a.id) as number) : 1000;
+      const ib = rank.has(b.id) ? (rank.get(b.id) as number) : 1000;
+      return ia - ib;
+    });
+  }, [hotspots, subsystems]);
+
   const active = useMemo(() => {
     if (!activeId) return null;
     return (
@@ -454,7 +464,7 @@ const SystemArchitecture: React.FC = () => {
             Click a chip to load it. Click again (or the ×) to remove it. Several can be on at once.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
-            {hotspots.map((h) => {
+            {orderedHotspots.map((h) => {
               const onMap = loadedSet.has(h.id);
               return (
                 <button
