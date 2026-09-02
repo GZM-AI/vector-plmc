@@ -1,6 +1,6 @@
 import React, { useMemo, useState, useRef, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, Crosshair, Layers, ChevronRight, X, Move, Save, Cloud, Eye, EyeOff } from 'lucide-react';
+import { Box, Crosshair, Layers, ChevronRight, X, Move, Save, Cloud } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES } from '../data/tarSeedData';
 import {
   getRegistryTree,
@@ -450,65 +450,40 @@ const SystemArchitecture: React.FC = () => {
             })}
           </div>
 
-          <div className="mt-5">
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <p className="text-sm text-zinc-300">
-                Zones on map
-                <span className="text-zinc-500"> · {loadedIds.length} loaded</span>
-              </p>
-              <p className="text-[11px] text-zinc-500">
-                Check any combination. Uncheck or press Remove to take a zone off the map.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {hotspots.map((h) => {
-                const onMap = loadedSet.has(h.id);
-                const selected = activeId === h.id;
-                return (
-                  <div
-                    key={h.id}
-                    className={
-                      'flex items-center gap-2 rounded-xl border px-2.5 py-2 bg-zinc-950 ' +
-                      (selected ? 'ring-2 ring-white border-white/40' : 'border-zinc-800')
-                    }
-                    style={{ borderColor: selected ? undefined : h.color }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={onMap}
-                      onChange={() => toggleZone(h.id)}
-                      className="accent-blue-500 w-4 h-4 shrink-0"
-                      title={onMap ? 'Remove from map' : 'Load onto map'}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => selectSubsystem(h.id)}
-                      className="flex-1 min-w-0 text-left text-xs truncate"
-                      style={{ color: h.color }}
+          <p className="mt-3 text-[10px] text-zinc-500">
+            Click a chip to load it. Click again (or the ×) to remove it. Several can be on at once.
+          </p>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {hotspots.map((h) => {
+              const onMap = loadedSet.has(h.id);
+              return (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => toggleZone(h.id)}
+                  title={onMap ? 'Remove zone from map' : 'Load zone onto map'}
+                  className={
+                    'inline-flex items-center gap-1 text-[10px] leading-none px-2 py-1 rounded-full border ' +
+                    (activeId === h.id ? 'ring-1 ring-white ' : '')
+                  }
+                  style={
+                    onMap
+                      ? { borderColor: h.color, backgroundColor: h.color, color: '#111' }
+                      : { borderColor: h.color, color: h.color, backgroundColor: 'transparent' }
+                  }
+                >
+                  <span className="truncate max-w-[9.5rem]">{labelFor(h.id, h.label)}</span>
+                  {onMap && (
+                    <span
+                      className="inline-flex w-3 h-3 items-center justify-center rounded-full bg-black/40 text-white"
+                      aria-hidden
                     >
-                      {labelFor(h.id, h.label)}
-                    </button>
-                    {onMap ? (
-                      <button
-                        type="button"
-                        onClick={() => toggleZone(h.id)}
-                        className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-zinc-800 text-zinc-300 hover:bg-red-900/60 hover:text-red-200"
-                      >
-                        <EyeOff size={12} /> Remove
-                      </button>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => toggleZone(h.id)}
-                        className="shrink-0 inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg bg-blue-600 text-white hover:bg-blue-500"
-                      >
-                        <Eye size={12} /> Load
-                      </button>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
+                      ×
+                    </span>
+                  )}
+                </button>
+              );
+            })}
           </div>
         </div>
 
