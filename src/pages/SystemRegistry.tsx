@@ -524,20 +524,29 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   };
 
   const handleSaveFields = () => {
+    const nextType = canEditType ? (draftType as AddableChildType) : entity.type;
+    const nextKind =
+      nextType === 'Element' ? (draftKind || 'hardware') : undefined;
     const updated = updateEntityFields(entity.id, {
       name: draftName.trim() || entity.name,
       description: draftDescription,
       notes: draftNotes,
       ...(canEditType
         ? {
-            type: draftType as AddableChildType,
-            kind: draftType === 'Element' ? draftKind : undefined,
+            type: nextType,
+            kind: nextKind,
           }
         : {}),
     });
     if (updated) {
       setEditing(false);
-      setSaveMsg('Saved on this device. Cloud sync comes next (same pattern as zone map).');
+      setDraftType(updated.type);
+      setDraftKind(((updated as ResourceEntity).kind as ElementKind) || 'hardware');
+      setSaveMsg(
+        nextType === 'Element'
+          ? `Saved as Element · ${nextKind}. Icon updates in tree and overview.`
+          : 'Saved.'
+      );
     }
   };
 
@@ -853,15 +862,24 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       {editing && canEditType && (
         <div className="bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label className="text-[11px] text-zinc-500 block mb-1">Type</label>
+            <label className="text-[11px] text-zinc-500 block mb-1">
+              Structural type
+            </label>
             <select
-              value={draftType}
-              onChange={(e) => setDraftType(e.target.value as typeof entity.type)}
+              value={draftType === 'Element' ? 'Element' : 'Component'}
+              onChange={(e) => {
+                const v = e.target.value as 'Component' | 'Element';
+                setDraftType(v);
+                if (v === 'Element' && !draftKind) setDraftKind('hardware');
+              }}
               className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
             >
-              <option value="Component">Component</option>
-              <option value="Element">Element</option>
+              <option value="Component">Component (assembly / group)</option>
+              <option value="Element">Element (leaf item)</option>
             </select>
+            <p className="text-[10px] text-zinc-600 mt-1">
+              Hardware is not a type — pick Element, then set kind to Hardware.
+            </p>
           </div>
           {draftType === 'Element' && (
             <div>

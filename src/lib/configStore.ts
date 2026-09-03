@@ -32,6 +32,8 @@ export type EntityOverlay = {
   name?: string;
   description?: string;
   notes?: string;
+  structuralType?: StructuralEntityType;
+  kind?: ElementKind;
 };
 
 /**
@@ -156,15 +158,22 @@ async function pullFromCloud(): Promise<boolean> {
         }
         continue;
       }
-      overlays[row.entityId] = {
-        revision: row.revision || 'A',
-        status: (row.status as ReleaseStatus) || 'Draft',
-        lastModified: row.lastModified || new Date().toISOString(),
-        modifiedBy: row.modifiedBy || undefined,
-        name: row.name ?? undefined,
-        description: row.description ?? undefined,
-        notes: row.notes ?? undefined,
-      };
+      {
+        const unpacked = unpackOverlayNotes(row.notes);
+        const localPrev = state.overlays[row.entityId];
+        overlays[row.entityId] = {
+          revision: row.revision || 'A',
+          status: (row.status as ReleaseStatus) || 'Draft',
+          lastModified: row.lastModified || new Date().toISOString(),
+          modifiedBy: row.modifiedBy || undefined,
+          name: row.name ?? undefined,
+          description: row.description ?? undefined,
+          notes: unpacked.notes ?? undefined,
+          structuralType:
+            unpacked.structuralType || localPrev?.structuralType || undefined,
+          kind: unpacked.kind || localPrev?.kind || undefined,
+        };
+      }
     }
 
     const extraEntities: ResourceEntity[] = (ex?.data || []).map((row: any) => ({
@@ -236,6 +245,38 @@ export function hydrateConfigStoreFromCloud(): Promise<void> {
   return hydratePromise;
 }
 
+/** Pack structuralType/kind into notes so they survive ProductOverlay (no dedicated fields). */
+const PLM_META_RE = /^\[\[plm-meta\]\](\{[^]*?\})\n?/;
+
+function packOverlayNotes(o: EntityOverlay): string | undefined {
+  const user = o.notes || '';
+  const meta: Record<string, string> = {};
+  if (o.structuralType) meta.st = o.structuralType;
+  if (o.kind) meta.k = o.kind;
+  if (!Object.keys(meta).length) return o.notes;
+  return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
+}
+
+function unpackOverlayNotes(raw: string | undefined | null): {
+  notes?: string;
+  structuralType?: StructuralEntityType;
+  kind?: ElementKind;
+} {
+  if (!raw) return {};
+  const m = raw.match(PLM_META_RE);
+  if (!m) return { notes: raw };
+  try {
+    const meta = JSON.parse(m[1]) as { st?: string; k?: string };
+    return {
+      notes: raw.slice(m[0].length) || undefined,
+      structuralType: meta.st as StructuralEntityType | undefined,
+      kind: meta.k as ElementKind | undefined,
+    };
+  } catch {
+    return { notes: raw };
+  }
+}
+
 async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<boolean> {
   const client = getProductClient();
   if (!client?.models?.ProductOverlay) return false;
@@ -245,7 +286,7 @@ async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<b
     status: o.status,
     name: o.name,
     description: o.description,
-    notes: o.notes,
+    notes: packOverlayNotes(o),
     modifiedBy: o.modifiedBy,
     lastModified: o.lastModified,
   };
@@ -426,6 +467,8 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
     modifiedBy: o.modifiedBy ?? entity.modifiedBy,
     name: o.name !== undefined ? o.name : entity.name,
     description: o.description !== undefined ? o.description : entity.description,
+    type: o.structuralType ?? entity.type,
+    kind: o.kind !== undefined ? o.kind : entity.kind,
     ...(o.notes !== undefined ? { notes: o.notes } : {}),
   } as ResourceEntity & { notes?: string };
 }
@@ -506,7 +549,12 @@ export function addChildEntity(
   const parent = getEntityById(parentId) || ALL_ENTITIES.find((e) => e.id === parentId);
   if (!parent) return null;
 
-  const allowed = ALLOWED_CHILD_TYPES[parent.type] || [];
+  const allowed =
+    parent.type === 'Subsystem'
+      ? (['Component', 'Element'] as StructuralEntityType[])
+      : parent.type === 'Component'
+        ? (['Element'] as StructuralEntityType[])
+        : ALLOWED_CHILD_TYPES[parent.type] || [];
   if (!allowed.includes(input.type)) {
     console.warn(
       `[configStore] cannot add ${input.type} under ${parent.type} (${parent.id}). Allowed: ${allowed.join(', ') || 'none'}`
@@ -602,6 +650,8 @@ export function updateEntityFields(
     description?: string;
     notes?: string;
     modifiedBy?: string;
+    type?: StructuralEntityType;
+    kind?: ElementKind;
   }
 ): ResourceEntity | null {
   const current = getEntityById(entityId);
@@ -621,6 +671,8 @@ export function updateEntityFields(
               name: fields.name !== undefined ? fields.name : e.name,
               description:
                 fields.description !== undefined ? fields.description : e.description,
+              type: fields.type !== undefined ? fields.type : e.type,
+              kind: fields.kind !== undefined ? fields.kind : e.kind,
               lastModified: now,
               modifiedBy: by,
             }
@@ -639,10 +691,14 @@ export function updateEntityFields(
     name: fields.name !== undefined ? fields.name : prev?.name,
     description: fields.description !== undefined ? fields.description : prev?.description,
     notes: fields.notes !== undefined ? fields.notes : prev?.notes,
+    structuralType: fields.type !== undefined ? fields.type : prev?.structuralType,
+    kind: fields.kind !== undefined ? fields.kind : prev?.kind,
   };
   if (fields.name !== undefined) nextOverlay.name = fields.name;
   if (fields.description !== undefined) nextOverlay.description = fields.description;
   if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
+  if (fields.type !== undefined) nextOverlay.structuralType = fields.type;
+  if (fields.kind !== undefined) nextOverlay.kind = fields.kind;
 
   state = {
     ...state,
