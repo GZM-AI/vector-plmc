@@ -1495,23 +1495,34 @@ const SubsystemOverviewCard: React.FC<{
                 onClick={() => onOpen(child.id)}
                 className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
               >
-                <span className="shrink-0">{nodeTypeIcon(c, 14)}</span>
+                <span className="shrink-0" title="Component">
+                  <Package size={14} className="text-zinc-300" />
+                </span>
                 <span className="text-xs text-zinc-300 group-hover:text-white truncate">
                   {c.name}
                 </span>
-                {(collectChildElementKinds(child).length > 0 || displayKindOf(c)) && (
-                  <span className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700">
-                    {(collectChildElementKinds(child).length
-                      ? collectChildElementKinds(child)
-                      : [displayKindOf(c) as ElementKind]
-                    ).map((k) => (
-                      <span key={k} title={ELEMENT_KIND_LABEL[k]}>
-                        {kindIcon(k, 12)}
-                      </span>
-                    ))}
-                  </span>
-                )}
                 <span className="flex-1" />
+                {(() => {
+                  const kinds =
+                    collectChildElementKinds(child).length > 0
+                      ? collectChildElementKinds(child)
+                      : displayKindOf(c)
+                        ? [displayKindOf(c) as ElementKind]
+                        : [];
+                  if (!kinds.length) return null;
+                  return (
+                    <span
+                      className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700"
+                      title={kinds.map((k) => ELEMENT_KIND_LABEL[k]).join(', ')}
+                    >
+                      {kinds.map((k) => (
+                        <span key={k} title={ELEMENT_KIND_LABEL[k]}>
+                          {kindIcon(k, 12)}
+                        </span>
+                      ))}
+                    </span>
+                  );
+                })()}
                 <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
                 <ChevronRight size={12} className="text-zinc-600 shrink-0" />
               </button>
