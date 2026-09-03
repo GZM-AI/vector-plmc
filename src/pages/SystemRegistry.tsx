@@ -91,6 +91,14 @@ function elementKindOf(node: { type: string; kind?: string }): ElementKind | nul
   return null;
 }
 
+/** A Component counts as hardware when summarizing kinds on overview cards. */
+function displayKindOf(node: { type: string; kind?: string }): ElementKind | null {
+  const k = elementKindOf(node);
+  if (k) return k;
+  if (node.type === 'Component') return 'hardware';
+  return null;
+}
+
 function kindIcon(kind: ElementKind, size = 14): React.ReactNode {
   switch (kind) {
     case 'hardware':
@@ -107,7 +115,7 @@ function kindIcon(kind: ElementKind, size = 14): React.ReactNode {
 }
 
 function nodeTypeIcon(node: { type: string; kind?: string }, size = 16): React.ReactNode {
-  const kind = elementKindOf(node);
+  const kind = displayKindOf(node);
   if (kind) return kindIcon(kind, size);
   return TYPE_ICON[node.type] || <Package size={size} className="text-zinc-400" />;
 }
@@ -115,7 +123,7 @@ function nodeTypeIcon(node: { type: string; kind?: string }, size = 16): React.R
 function collectChildElementKinds(node: ResourceEntity): ElementKind[] {
   const found = new Set<ElementKind>();
   const walk = (n: ResourceEntity) => {
-    const k = elementKindOf(n);
+    const k = displayKindOf(n);
     if (k) found.add(k);
     (n.children || []).forEach(walk);
   };
@@ -124,7 +132,7 @@ function collectChildElementKinds(node: ResourceEntity): ElementKind[] {
 }
 
 function countElementKind(node: ResourceEntity, kind: ElementKind): number {
-  let n = elementKindOf(node) === kind ? 1 : 0;
+  let n = displayKindOf(node) === kind ? 1 : 0;
   for (const c of node.children || []) n += countElementKind(c, kind);
   return n;
 }
@@ -1379,10 +1387,10 @@ const SubsystemOverviewCard: React.FC<{
               {sub.name}
             </h3>
             {collectChildElementKinds(sub).length > 0 && (
-              <span className="inline-flex items-center gap-0.5 shrink-0">
+              <span className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-lg bg-zinc-950/80 border border-zinc-700">
                 {collectChildElementKinds(sub).map((k) => (
                   <span key={k} title={ELEMENT_KIND_LABEL[k]}>
-                    {kindIcon(k, 13)}
+                    {kindIcon(k, 14)}
                   </span>
                 ))}
               </span>
@@ -1469,15 +1477,18 @@ const SubsystemOverviewCard: React.FC<{
                 onClick={() => onOpen(child.id)}
                 className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
               >
-                <span className="shrink-0 opacity-80">{nodeTypeIcon(c, 14)}</span>
+                <span className="shrink-0">{nodeTypeIcon(c, 14)}</span>
                 <span className="text-xs text-zinc-300 group-hover:text-white truncate">
                   {c.name}
                 </span>
-                {collectChildElementKinds(child).length > 0 && (
-                  <span className="inline-flex items-center gap-0.5 shrink-0">
-                    {collectChildElementKinds(child).map((k) => (
+                {(collectChildElementKinds(child).length > 0 || displayKindOf(c)) && (
+                  <span className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700">
+                    {(collectChildElementKinds(child).length
+                      ? collectChildElementKinds(child)
+                      : [displayKindOf(c) as ElementKind]
+                    ).map((k) => (
                       <span key={k} title={ELEMENT_KIND_LABEL[k]}>
-                        {kindIcon(k, 11)}
+                        {kindIcon(k, 12)}
                       </span>
                     ))}
                   </span>
