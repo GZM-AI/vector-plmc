@@ -123,6 +123,12 @@ function collectChildElementKinds(node: ResourceEntity): ElementKind[] {
   return KIND_ORDER.filter((k) => found.has(k));
 }
 
+function countElementKind(node: ResourceEntity, kind: ElementKind): number {
+  let n = elementKindOf(node) === kind ? 1 : 0;
+  for (const c of node.children || []) n += countElementKind(c, kind);
+  return n;
+}
+
 const TYPE_LABEL: Record<string, string> = {
   System: 'System',
   Subsystem: 'Subsystem',
@@ -1362,13 +1368,6 @@ const SubsystemOverviewCard: React.FC<{
   const sub = applyOverlay(rawSub);
   const accent = SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
   const children = sortChildren(sub.id, sub.children || []);
-  const counts = useMemo(() => {
-    const c: Record<string, number> = {};
-    children.forEach((ch) => {
-      c[ch.type] = (c[ch.type] || 0) + 1;
-    });
-    return c;
-  }, [children]);
 
   return (
     <div className={`border rounded-3xl p-5 flex flex-col ${accent}`}>
@@ -1379,6 +1378,15 @@ const SubsystemOverviewCard: React.FC<{
             <h3 className="text-base font-semibold text-white group-hover:text-blue-300 leading-snug">
               {sub.name}
             </h3>
+            {collectChildElementKinds(sub).length > 0 && (
+              <span className="inline-flex items-center gap-0.5 shrink-0">
+                {collectChildElementKinds(sub).map((k) => (
+                  <span key={k} title={ELEMENT_KIND_LABEL[k]}>
+                    {kindIcon(k, 13)}
+                  </span>
+                ))}
+              </span>
+            )}
           </div>
           <span className={`text-[10px] px-2 py-0.5 rounded-full shrink-0 ${STATUS_STYLE[sub.status]}`}>
             {sub.status}
@@ -1391,13 +1399,22 @@ const SubsystemOverviewCard: React.FC<{
 
       <div className="flex flex-wrap gap-1.5 mb-3 text-[10px] text-zinc-500">
         <span className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
-          {children.length} elements
+          {children.length} components
         </span>
-        {Object.entries(counts).map(([t, n]) => (
-          <span key={t} className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
-            {n} {TYPE_LABEL[t as EntityType] ?? t}
-          </span>
-        ))}
+        {KIND_ORDER.map((k) => {
+          const n = countElementKind(sub, k);
+          if (!n) return null;
+          return (
+            <span
+              key={k}
+              title={ELEMENT_KIND_LABEL[k]}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800"
+            >
+              {kindIcon(k, 11)}
+              {n}
+            </span>
+          );
+        })}
         <span className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
           Rev {sub.revision}
         </span>
@@ -1453,9 +1470,19 @@ const SubsystemOverviewCard: React.FC<{
                 className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
               >
                 <span className="shrink-0 opacity-80">{nodeTypeIcon(c, 14)}</span>
-                <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
+                <span className="text-xs text-zinc-300 group-hover:text-white truncate">
                   {c.name}
                 </span>
+                {collectChildElementKinds(child).length > 0 && (
+                  <span className="inline-flex items-center gap-0.5 shrink-0">
+                    {collectChildElementKinds(child).map((k) => (
+                      <span key={k} title={ELEMENT_KIND_LABEL[k]}>
+                        {kindIcon(k, 11)}
+                      </span>
+                    ))}
+                  </span>
+                )}
+                <span className="flex-1" />
                 <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
                 <ChevronRight size={12} className="text-zinc-600 shrink-0" />
               </button>
