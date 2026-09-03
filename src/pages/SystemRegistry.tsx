@@ -81,6 +81,48 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   Capability: <Zap size={16} className="text-amber-400" />,
 };
 
+const KIND_ORDER: ElementKind[] = ['hardware', 'software', 'interface', 'integrator', 'other'];
+
+function elementKindOf(node: { type: string; kind?: string }): ElementKind | null {
+  if (node.type === 'Element') return (node.kind as ElementKind) || 'other';
+  if (node.type === 'SoftwareItem') return 'software';
+  if (node.type === 'Interface') return 'interface';
+  if (node.type === 'Capability') return 'integrator';
+  return null;
+}
+
+function kindIcon(kind: ElementKind, size = 14): React.ReactNode {
+  switch (kind) {
+    case 'hardware':
+      return <Box size={size} className="text-zinc-300" />;
+    case 'software':
+      return <Cpu size={size} className="text-emerald-400" />;
+    case 'interface':
+      return <GitBranch size={size} className="text-sky-400" />;
+    case 'integrator':
+      return <Factory size={size} className="text-amber-400" />;
+    default:
+      return <Zap size={size} className="text-zinc-500" />;
+  }
+}
+
+function nodeTypeIcon(node: { type: string; kind?: string }, size = 16): React.ReactNode {
+  const kind = elementKindOf(node);
+  if (kind) return kindIcon(kind, size);
+  return TYPE_ICON[node.type] || <Package size={size} className="text-zinc-400" />;
+}
+
+function collectChildElementKinds(node: ResourceEntity): ElementKind[] {
+  const found = new Set<ElementKind>();
+  const walk = (n: ResourceEntity) => {
+    const k = elementKindOf(n);
+    if (k) found.add(k);
+    (n.children || []).forEach(walk);
+  };
+  (node.children || []).forEach(walk);
+  return KIND_ORDER.filter((k) => found.has(k));
+}
+
 const TYPE_LABEL: Record<string, string> = {
   System: 'System',
   Subsystem: 'Subsystem',
@@ -204,14 +246,25 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         ) : (
           <span className="w-4 shrink-0" />
         )}
-        <span className="shrink-0">{TYPE_ICON[node.type]}</span>
+        <span className="shrink-0">{nodeTypeIcon(display)}</span>
         <span
-          className={`text-sm truncate flex-1 ${
+          className={`text-sm truncate ${
             isSelected ? 'text-white font-medium' : 'text-zinc-300 group-hover:text-white'
           }`}
         >
           {display.name}
         </span>
+        {(node.type === 'Component' || node.type === 'Subsystem') &&
+          collectChildElementKinds(node).length > 0 && (
+            <span className="inline-flex items-center gap-0.5 shrink-0 ml-1">
+              {collectChildElementKinds(node).map((k) => (
+                <span key={k} title={ELEMENT_KIND_LABEL[k]} className="opacity-90">
+                  {kindIcon(k, 12)}
+                </span>
+              ))}
+            </span>
+          )}
+        <span className="flex-1" />
         <span className="text-[10px] text-zinc-600 shrink-0 hidden sm:inline">
           Rev {display.revision}
         </span>
@@ -526,7 +579,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-4">
           <div className="w-12 h-12 rounded-2xl bg-zinc-950 border border-zinc-700 flex items-center justify-center shrink-0">
-            {TYPE_ICON[entity.type]}
+            {nodeTypeIcon(entity)}
           </div>
           <div className="min-w-0">
             {editing ? (
@@ -1232,7 +1285,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       className="w-full text-left"
                     >
                       <div className="flex items-center gap-2 mb-1">
-                        {TYPE_ICON[child.type]}
+                        {nodeTypeIcon(c, 16)}
                         <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
                           {c.name}
                         </span>
@@ -1399,7 +1452,7 @@ const SubsystemOverviewCard: React.FC<{
                 onClick={() => onOpen(child.id)}
                 className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
               >
-                <span className="shrink-0 opacity-80">{TYPE_ICON[child.type]}</span>
+                <span className="shrink-0 opacity-80">{nodeTypeIcon(c, 14)}</span>
                 <span className="text-xs text-zinc-300 group-hover:text-white truncate flex-1">
                   {c.name}
                 </span>
