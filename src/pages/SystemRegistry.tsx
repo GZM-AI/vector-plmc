@@ -7,6 +7,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
+  Box,
   Cog,
   ChevronRight,
   ChevronDown,
