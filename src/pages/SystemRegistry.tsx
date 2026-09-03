@@ -4,7 +4,7 @@
  * Phase 0: revision + status + attachments
  * Phase 1: revision history timeline + bump revision (configStore)
  */
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   Box,
@@ -30,6 +30,7 @@ import {
   Factory,
   ChevronUp,
   Trash2,
+  Download,
 } from 'lucide-react';
 import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childOrderStore';
 import {
@@ -43,8 +44,17 @@ import {
   EntityStatus,
   SUBSYSTEM_COLORS,
 } from '../data/tarSeedData';
-import { documentsForEntity } from '../data/documentsSeed';
-import type { Document, ReleaseStatus, RevisionRecord } from '../types/plm';
+import {
+  documentsForEntity,
+  subscribeDocumentsStore,
+  attachDocumentToEntity,
+  getDocumentDownloadUrl,
+  unlinkDocumentFromEntity,
+  hydrateDocumentsStoreFromCloud,
+  getDocumentsError,
+} from '../lib/documentsStore';
+import type { Document, ReleaseStatus, RevisionRecord, ElementKind } from '../types/plm';
+import { ELEMENT_KIND_LABEL } from '../types/plm';
 import {
   applyOverlay,
   bumpEntityRevision,
@@ -61,23 +71,32 @@ import { nextRevision } from '../lib/revisionUtils';
 
 type ViewMode = 'overview' | 'tree';
 
-const TYPE_ICON: Record<EntityType, React.ReactNode> = {
+const TYPE_ICON: Record<string, React.ReactNode> = {
   System: <Crosshair size={16} className="text-blue-400" />,
   Subsystem: <Layers size={16} className="text-violet-400" />,
   Component: <Package size={16} className="text-zinc-300" />,
+  Element: <Cpu size={16} className="text-emerald-400" />,
   SoftwareItem: <Cpu size={16} className="text-emerald-400" />,
   Interface: <GitBranch size={16} className="text-sky-400" />,
   Capability: <Zap size={16} className="text-amber-400" />,
 };
 
-const TYPE_LABEL: Record<EntityType, string> = {
+const TYPE_LABEL: Record<string, string> = {
   System: 'System',
   Subsystem: 'Subsystem',
   Component: 'Component',
+  Element: 'Element',
   SoftwareItem: 'Software',
   Interface: 'Interface',
   Capability: 'Integrator',
 };
+
+function typeBadge(entity: { type: string; kind?: string }): string {
+  if (entity.type === 'Element' && entity.kind) {
+    return `Element · ${ELEMENT_KIND_LABEL[entity.kind as ElementKind] || entity.kind}`;
+  }
+  return TYPE_LABEL[entity.type] || entity.type;
+}
 
 const STATUS_STYLE: Record<EntityStatus, string> = {
   Draft: 'bg-zinc-700 text-zinc-300',
@@ -318,10 +337,22 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       ? SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[entity.id] || 'sky'] || 'border-zinc-700'
       : 'border-zinc-700';
 
+  const [docsTick, setDocsTick] = useState(0);
+  const [attachBusy, setAttachBusy] = useState(false);
+  const [attachErr, setAttachErr] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const linkedDocs: Document[] = useMemo(
     () => documentsForEntity(entity.id),
-    [entity.id]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [entity.id, docsTick]
   );
+
+  useEffect(() => {
+    const unsub = subscribeDocumentsStore(() => setDocsTick((t) => t + 1));
+    void hydrateDocumentsStoreFromCloud();
+    return unsub;
+  }, []);
 
   const history: RevisionRecord[] = useMemo(
     () => getHistoryForEntity(entity.id),
@@ -344,31 +375,54 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
-  const [childType, setChildType] = useState<AddableChildType>('Component');
+  const [childType, setChildType] = useState<AddableChildType>(
+    entity.type === 'Component' ? 'Element' : entity.type === 'System' ? 'Subsystem' : 'Component'
+  );
+  const [childKind, setChildKind] = useState<ElementKind>('hardware');
   const [childDescription, setChildDescription] = useState('');
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
+  const [draftType, setDraftType] = useState(entity.type);
+  const [draftKind, setDraftKind] = useState<ElementKind>(
+    ((entity as ResourceEntity).kind as ElementKind) || 'hardware'
+  );
 
   const canRemoveSelf =
     entity.type === 'Component' ||
+    entity.type === 'Element' ||
     entity.type === 'SoftwareItem' ||
     entity.type === 'Interface' ||
     entity.type === 'Capability';
 
-  const canAddChild = entity.type === 'System' || entity.type === 'Subsystem';
+  const canAddChild =
+    entity.type === 'System' || entity.type === 'Subsystem' || entity.type === 'Component';
+  const canEditType = entity.type === 'Component' || entity.type === 'Element';
+  const addableTypes: AddableChildType[] =
+    entity.type === 'System'
+      ? ['Subsystem']
+      : entity.type === 'Subsystem'
+        ? ['Component', 'Element']
+        : entity.type === 'Component'
+          ? ['Element']
+          : [];
 
   // Keep drafts in sync when selecting another entity or overlay updates
   useEffect(() => {
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftType(entity.type);
+    setDraftKind(((entity as ResourceEntity).kind as ElementKind) || 'hardware');
     setEditing(false);
     setSaveMsg(null);
     setShowAddChild(false);
     setChildName('');
     setChildDescription('');
-    setChildType('Component');
+    setChildType(
+      entity.type === 'Component' ? 'Element' : entity.type === 'System' ? 'Subsystem' : 'Component'
+    );
+    setChildKind('hardware');
     setPendingRemoveId(null);
-  }, [entity.id, entity.name, entity.description, entity.revision]);
+  }, [entity.id, entity.name, entity.description, entity.revision, entity.type]);
 
   const previewNext = nextRevision(entity.revision);
 
@@ -388,6 +442,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftType(entity.type);
+    setDraftKind(((entity as ResourceEntity).kind as ElementKind) || 'hardware');
     setEditing(true);
     setSaveMsg(null);
   };
@@ -405,6 +461,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       name: draftName.trim() || entity.name,
       description: draftDescription,
       notes: draftNotes,
+      ...(canEditType
+        ? {
+            type: draftType as AddableChildType,
+            kind: draftType === 'Element' ? draftKind : undefined,
+          }
+        : {}),
     });
     if (updated) {
       setEditing(false);
@@ -417,14 +479,20 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       name: childName,
       type: childType,
       description: childDescription,
+      kind: childType === 'Element' ? childKind : undefined,
     });
     if (created) {
       setShowAddChild(false);
       setChildName('');
       setChildDescription('');
-      setChildType('Component');
+      setChildType(addableTypes[0] || 'Component');
+      setChildKind('hardware');
       setSaveMsg(`Added “${created.name}” under ${entity.name}.`);
       onSelectRelated?.(created.id);
+    } else {
+      setSaveMsg(
+        'Could not add that child. Under a subsystem use Component or Element; under a component use Element.'
+      );
     }
   };
 
@@ -472,7 +540,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             )}
             <div className="flex flex-wrap items-center gap-2 mt-2">
               <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-800 text-zinc-300 border border-zinc-700">
-                {TYPE_LABEL[entity.type]}
+                {typeBadge(entity)}
               </span>
               <span className={`text-xs px-2.5 py-1 rounded-full ${STATUS_STYLE[entity.status]}`}>
                 {entity.status}
@@ -715,6 +783,38 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
+      {editing && canEditType && (
+        <div className="bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label className="text-[11px] text-zinc-500 block mb-1">Type</label>
+            <select
+              value={draftType}
+              onChange={(e) => setDraftType(e.target.value as typeof entity.type)}
+              className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="Component">Component</option>
+              <option value="Element">Element</option>
+            </select>
+          </div>
+          {draftType === 'Element' && (
+            <div>
+              <label className="text-[11px] text-zinc-500 block mb-1">Element kind</label>
+              <select
+                value={draftKind}
+                onChange={(e) => setDraftKind(e.target.value as ElementKind)}
+                className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="hardware">Hardware</option>
+                <option value="software">Software</option>
+                <option value="interface">Interface</option>
+                <option value="integrator">Integrator</option>
+                <option value="other">Other</option>
+              </select>
+            </div>
+          )}
+        </div>
+      )}
+
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
         {editing ? (
@@ -887,7 +987,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {/* Phase 0 — Attachments */}
+      {/* Attachments — Amplify Storage + Document model (team-shared) */}
       <div>
         <div className="flex items-center justify-between mb-3">
           <h4 className="text-sm font-medium text-blue-400 flex items-center gap-2">
@@ -896,17 +996,47 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </h4>
           <button
             type="button"
-            disabled
-            title="Upload wiring comes with Amplify Storage (Phase 0 UI shell)"
-            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-950 border border-zinc-700 text-zinc-500 cursor-not-allowed"
+            disabled={attachBusy}
+            onClick={() => fileInputRef.current?.click()}
+            title="Upload to team Amplify Storage and link to this entity"
+            className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-sky-600/20 border border-sky-700/50 text-sky-300 hover:bg-sky-600/30 disabled:opacity-50 disabled:cursor-wait"
           >
             <Plus size={12} />
-            Attach document
+            {attachBusy ? 'Uploading…' : 'Attach document'}
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="hidden"
+            onChange={async (e) => {
+              const file = e.target.files?.[0];
+              e.target.value = '';
+              if (!file) return;
+              setAttachErr(null);
+              setAttachBusy(true);
+              try {
+                await attachDocumentToEntity(entity.id, file);
+              } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                setAttachErr(
+                  /not authenticated|unauthenticated|No current user|UserUnAuthenticated/i.test(msg)
+                    ? 'Sign in first — attachments are stored in the team cloud, not on this device.'
+                    : msg
+                );
+              } finally {
+                setAttachBusy(false);
+              }
+            }}
+          />
         </div>
+        {(attachErr || getDocumentsError()) && (
+          <p className="text-xs text-red-400 mb-2">
+            {attachErr || getDocumentsError()}
+          </p>
+        )}
         {linkedDocs.length === 0 ? (
           <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
-            No documents linked yet.
+            No documents linked yet. Files are stored in team Amplify Storage (not only this browser).
           </p>
         ) : (
           <ul className="space-y-2">
@@ -926,10 +1056,51 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       {d.status}
                     </span>
                     <span className="text-[10px] text-zinc-500">Rev {d.revision}</span>
+                    {typeof d.sizeBytes === 'number' && (
+                      <span className="text-[10px] text-zinc-600">
+                        {d.sizeBytes >= 1048576
+                          ? `${(d.sizeBytes / 1048576).toFixed(1)} MB`
+                          : `${Math.max(1, Math.round(d.sizeBytes / 1024))} KB`}
+                      </span>
+                    )}
                   </div>
                   {d.description && (
                     <p className="text-xs text-zinc-500 mt-1 line-clamp-2">{d.description}</p>
                   )}
+                  {d.fileName && (
+                    <p className="text-[11px] text-zinc-600 mt-0.5 truncate">{d.fileName}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  <button
+                    type="button"
+                    title="Open / download"
+                    onClick={async () => {
+                      try {
+                        const url = await getDocumentDownloadUrl(d);
+                        window.open(url, '_blank', 'noopener,noreferrer');
+                      } catch (err) {
+                        setAttachErr(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-300 hover:bg-zinc-900"
+                  >
+                    <Download size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Unlink from this entity"
+                    onClick={async () => {
+                      try {
+                        await unlinkDocumentFromEntity(d.id, entity.id);
+                      } catch (err) {
+                        setAttachErr(err instanceof Error ? err.message : String(err));
+                      }
+                    }}
+                    className="p-1.5 rounded-lg text-zinc-500 hover:text-red-300 hover:bg-zinc-900"
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </li>
             ))}
@@ -958,8 +1129,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           {showAddChild && (
             <div className="mb-4 bg-zinc-950 border border-emerald-900/40 rounded-2xl p-4 space-y-3">
               <p className="text-xs text-zinc-400">
-                Add a component, software item, interface, or integrator under{' '}
-                <span className="text-zinc-200">{entity.name}</span>.
+                Add a child under <span className="text-zinc-200">{entity.name}</span>.
+                {entity.type === 'Subsystem'
+                  ? ' Use Component for assemblies, or Element for a leaf (hardware, software, interface, integrator).'
+                  : entity.type === 'Component'
+                    ? ' Components take Elements (hardware / software / interface / integrator).'
+                    : ' Systems take subsystems.'}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -978,12 +1153,29 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     onChange={(e) => setChildType(e.target.value as AddableChildType)}
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                   >
-                    <option value="Component">Component</option>
-                    <option value="SoftwareItem">Software</option>
-                    <option value="Interface">Interface</option>
-                    <option value="Capability">Integrator</option>
+                    {addableTypes.map((t) => (
+                      <option key={t} value={t}>
+                        {TYPE_LABEL[t] || t}
+                      </option>
+                    ))}
                   </select>
                 </div>
+                {childType === 'Element' && (
+                  <div>
+                    <label className="text-[11px] text-zinc-500 block mb-1">Element kind</label>
+                    <select
+                      value={childKind}
+                      onChange={(e) => setChildKind(e.target.value as ElementKind)}
+                      className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                    >
+                      <option value="hardware">Hardware</option>
+                      <option value="software">Software</option>
+                      <option value="interface">Interface</option>
+                      <option value="integrator">Integrator</option>
+                      <option value="other">Other</option>
+                    </select>
+                  </div>
+                )}
               </div>
               <div>
                 <label className="text-[11px] text-zinc-500 block mb-1">Description (optional)</label>

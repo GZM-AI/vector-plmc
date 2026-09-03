@@ -115,7 +115,7 @@ export interface ClassificationFields {
 /**
  * Document is a first-class PLM object. Attachments are links from any entity
  * to a Document (many-to-many via entity.attachmentIds ↔ document.linkedEntityIds).
- * Phase 0: metadata + mock URLs only (no real S3 upload yet).
+ * File bytes live in Amplify Storage at documents/{documentId}/{fileName}.
  */
 export interface Document extends RevisionFields, ClassificationFields {
   id: string;
@@ -127,8 +127,10 @@ export interface Document extends RevisionFields, ClassificationFields {
   mimeType?: string;
   /** File size in bytes (optional) */
   sizeBytes?: number;
-  /** Placeholder or future S3/AppSync URL */
+  /** Placeholder or signed download URL */
   url?: string;
+  /** Amplify Storage key: documents/{documentId}/{fileName} */
+  storageKey?: string;
   /** Entities this document is linked to */
   linkedEntityIds: string[];
   /** Optional original filename */
