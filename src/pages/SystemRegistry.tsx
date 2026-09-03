@@ -7,7 +7,7 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import {
-  Box,
+  Cog,
   ChevronRight,
   ChevronDown,
   Cpu,
@@ -91,18 +91,15 @@ function elementKindOf(node: { type: string; kind?: string }): ElementKind | nul
   return null;
 }
 
-/** A Component counts as hardware when summarizing kinds on overview cards. */
+/** True element kind only — Component is an assembly, not hardware. */
 function displayKindOf(node: { type: string; kind?: string }): ElementKind | null {
-  const k = elementKindOf(node);
-  if (k) return k;
-  if (node.type === 'Component') return 'hardware';
-  return null;
+  return elementKindOf(node);
 }
 
 function kindIcon(kind: ElementKind, size = 14): React.ReactNode {
   switch (kind) {
     case 'hardware':
-      return <Box size={size} className="text-zinc-300" />;
+      return <Cog size={size} className="text-orange-300" />;
     case 'software':
       return <Cpu size={size} className="text-emerald-400" />;
     case 'interface':
@@ -114,16 +111,18 @@ function kindIcon(kind: ElementKind, size = 14): React.ReactNode {
   }
 }
 
+/** Type icon for rows. Elements use kind; Components stay Package. */
 function nodeTypeIcon(node: { type: string; kind?: string }, size = 16): React.ReactNode {
-  const kind = displayKindOf(node);
+  const kind = elementKindOf(node);
   if (kind) return kindIcon(kind, size);
   return TYPE_ICON[node.type] || <Package size={size} className="text-zinc-400" />;
 }
 
+/** Unique element kinds under a node (not the node itself if it is a Component). */
 function collectChildElementKinds(node: ResourceEntity): ElementKind[] {
   const found = new Set<ElementKind>();
   const walk = (n: ResourceEntity) => {
-    const k = displayKindOf(n);
+    const k = elementKindOf(n);
     if (k) found.add(k);
     (n.children || []).forEach(walk);
   };
@@ -132,7 +131,7 @@ function collectChildElementKinds(node: ResourceEntity): ElementKind[] {
 }
 
 function countElementKind(node: ResourceEntity, kind: ElementKind): number {
-  let n = displayKindOf(node) === kind ? 1 : 0;
+  let n = elementKindOf(node) === kind ? 1 : 0;
   for (const c of node.children || []) n += countElementKind(c, kind);
   return n;
 }
