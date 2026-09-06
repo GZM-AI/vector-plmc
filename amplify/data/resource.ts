@@ -2,7 +2,7 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
 
 /**
  * Vector PLM — Amplify Data
- * MapLayout + Registry spine + Change Control + Documents + Suppliers
+ * MapLayout + Registry spine + Change Control + Documents + Suppliers + Research
  *
  * Document model: authenticated only (no publicApiKey).
  * Other models keep publicApiKey for current team workflow.
@@ -197,6 +197,34 @@ const schema = a.schema({
       updatedAt: a.string().required(),
     })
     .identifier(['entityId'])
+    .authorization((allow) => [
+      allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
+      allow.authenticated().to(['read', 'create', 'update', 'delete']),
+    ]),
+
+  /**
+   * Saved Deep Research runs
+   * Tags: model / provider, research kind, optional Registry entity
+   */
+  ResearchRecord: a
+    .model({
+      id: a.string().required(),
+      title: a.string().required(),
+      query: a.string().required(),
+      resultText: a.string().required(),
+      kind: a.string().required(),
+      kindId: a.string().required(),
+      provider: a.string().required(),
+      modelId: a.string().required(),
+      modelLabel: a.string().required(),
+      entityId: a.string(),
+      entityName: a.string(),
+      entityType: a.string(),
+      createdAt: a.string().required(),
+      createdBy: a.string(),
+      status: a.string().required(),
+    })
+    .identifier(['id'])
     .authorization((allow) => [
       allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
