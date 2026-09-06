@@ -210,11 +210,25 @@ export function sumLines(lines: PlanLine[]): {
   return { nre, unit, total, missingCost };
 }
 
+/**
+ * Vertical Integrators are sourcing candidates (companies / products),
+ * not costed BOM lines. Skip the folder and everything under it.
+ */
+function isSourcingBranch(n: ResourceEntity): boolean {
+  if (!n) return false;
+  if (n.type === 'Capability') return true;
+  const kind = (n as ResourceEntity & { kind?: string }).kind;
+  if (kind === 'integrator' || kind === 'company' || kind === 'product') return true;
+  return (n.name || '').trim().toLowerCase() === 'vertical integrators';
+}
+
+/** Costable design parts under a subsystem — excludes Vertical Integrators. */
 export function collectCostableUnder(node: ResourceEntity): ResourceEntity[] {
   const children = node.children || [];
   if (children.length === 0) return [];
   const out: ResourceEntity[] = [];
   const walk = (n: ResourceEntity) => {
+    if (isSourcingBranch(n)) return;
     const kids = n.children || [];
     if (kids.length === 0) {
       if (n.type !== 'System' && n.type !== 'Subsystem') out.push(n);
