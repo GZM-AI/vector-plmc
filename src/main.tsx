@@ -10,6 +10,7 @@ import { hydrateConfigStoreFromCloud } from './lib/configStore'
 import { ensurePlanningHydrated } from './lib/planningStore'
 import { hydrateSuppliersStoreFromCloud } from './lib/suppliersStore'
 import { hydrateDocumentsStoreFromCloud } from './lib/documentsStore'
+import { hydrateResearchStoreFromCloud } from './lib/researchStore'
 import type { Schema } from '../amplify/data/resource'
 
 async function boot() {
@@ -30,6 +31,7 @@ async function boot() {
     await ensurePlanningHydrated()
     await hydrateSuppliersStoreFromCloud()
     await hydrateDocumentsStoreFromCloud()
+    await hydrateResearchStoreFromCloud()
   } catch (err) {
     console.warn(
       'PLM Console — Amplify not fully configured; app will use local cache only.',

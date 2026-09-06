@@ -11,6 +11,8 @@ import {
   Factory,
   MessageSquare,
   AlertTriangle,
+  Bookmark,
+  Trash2,
 } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES, ResourceEntity } from '../data/tarSeedData';
 import {
@@ -19,6 +21,15 @@ import {
   RESEARCH_MODELS,
 } from '../lib/researchModels';
 import { runResearch } from '../lib/runResearch';
+import {
+  getResearchRuns,
+  getResearchStoreError,
+  saveResearchRun,
+  deleteResearchRun,
+  subscribeResearchStore,
+  hydrateResearchStoreFromCloud,
+  type ResearchRun,
+} from '../lib/researchStore';
 
 type ResearchKind = 'company' | 'product' | 'cost' | 'manufacturing' | 'open';
 
@@ -63,8 +74,21 @@ const DeepResearch: React.FC = () => {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [saveTitle, setSaveTitle] = useState('');
+  const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [runsTick, setRunsTick] = useState(0);
+  const [openRunId, setOpenRunId] = useState<string | null>(null);
 
   const providerModels = useMemo(() => modelsForProvider(provider), [provider]);
+  const runs = useMemo(() => getResearchRuns(), [runsTick]);
+  const storeError = getResearchStoreError();
+
+  useEffect(() => {
+    const unsub = subscribeResearchStore(() => setRunsTick((t) => t + 1));
+    void hydrateResearchStoreFromCloud();
+    return unsub;
+  }, []);
 
   useEffect(() => {
     const first = modelsForProvider(provider)[0];
@@ -102,6 +126,8 @@ const DeepResearch: React.FC = () => {
     setRunning(true);
     setError(null);
     setResult(null);
+    setSaveMsg(null);
+    setOpenRunId(null);
     try {
       const text = await runResearch({
         modelId,
@@ -119,11 +145,54 @@ const DeepResearch: React.FC = () => {
           : null,
       });
       setResult(text);
+      setSaveTitle(query.trim().slice(0, 120));
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
       setRunning(false);
     }
+  };
+
+  const handleSave = async () => {
+    if (!result || !query.trim()) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const run = await saveResearchRun({
+        title: saveTitle || query.trim(),
+        query: query.trim(),
+        resultText: result,
+        kind: KIND_META[kind].label,
+        kindId: kind,
+        provider,
+        modelId,
+        modelLabel: activeModelLabel,
+        entityId: selectedEntity?.id,
+        entityName: selectedEntity?.name,
+        entityType: selectedEntity?.type,
+      });
+      setOpenRunId(run.id);
+      setSaveMsg(storeError || 'Saved. Tagged with model, type, and Registry context.');
+    } catch (e: any) {
+      setSaveMsg(e?.message || String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const openRun = (run: ResearchRun) => {
+    setOpenRunId(run.id);
+    setQuery(run.query);
+    setResult(run.resultText);
+    setSaveTitle(run.title);
+    setProvider(run.provider);
+    setModelId(run.modelId);
+    if (['company', 'product', 'cost', 'manufacturing', 'open'].includes(run.kindId)) {
+      setKind(run.kindId);
+    }
+    setEntityId(run.entityId || '');
+    setError(null);
+    setSaveMsg(`Opened “${run.title}”`);
   };
 
   return (
@@ -134,7 +203,7 @@ const DeepResearch: React.FC = () => {
             <Search className="text-blue-400" /> Deep Research
           </h1>
           <p className="text-zinc-400 mt-2">
-            Same proxy as PID · Grok · Claude (Bedrock) · Registry context
+            Same proxy as PID · Grok · Claude (Bedrock) · Registry context · Saved runs
           </p>
         </div>
         <div className="flex flex-wrap gap-3">
@@ -165,7 +234,9 @@ const DeepResearch: React.FC = () => {
           Calls the <strong>same Lambda</strong> as PID Design Lab (
           <code className="text-blue-100">bedrockChat</code> /{' '}
           <code className="text-blue-100">grokChat</code>). Vendor API keys stay on the server.
-          If requests fail with CORS, allow this app origin on that Function URL.
+          Saved runs keep model, research type, and Registry context. Until{' '}
+          <code className="text-blue-100">ResearchRecord</code> is deployed on Amplify, the
+          library lives in this browser cache and uploads when the model exists.
         </div>
       </div>
 
@@ -257,6 +328,65 @@ const DeepResearch: React.FC = () => {
               </p>
             )}
           </div>
+
+          <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-5 space-y-3">
+            <h3 className="text-sm font-medium text-blue-400 flex items-center gap-2">
+              <Bookmark size={14} /> Saved runs
+              <span className="text-[10px] text-zinc-500 font-normal ml-auto">
+                {runs.length}
+              </span>
+            </h3>
+            {runs.length === 0 && (
+              <p className="text-xs text-zinc-600">
+                After a run, use Save this run. Each card stores model, type, and Registry
+                context.
+              </p>
+            )}
+            <div className="space-y-2 max-h-[420px] overflow-y-auto pr-1">
+              {runs.map((run) => (
+                <div
+                  key={run.id}
+                  className={`rounded-2xl border px-3 py-2.5 ${
+                    openRunId === run.id
+                      ? 'border-blue-500 bg-blue-600/15'
+                      : 'border-zinc-800 bg-zinc-950'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => openRun(run)}
+                    className="w-full text-left"
+                  >
+                    <div className="text-sm text-zinc-200 truncate">{run.title}</div>
+                    <div className="text-[10px] text-zinc-500 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
+                      <span>{run.modelLabel}</span>
+                      <span>· {run.kind}</span>
+                      <span>
+                        · {run.entityName ? run.entityName : 'No Registry context'}
+                      </span>
+                    </div>
+                    <div className="text-[10px] text-zinc-600 mt-0.5">
+                      {new Date(run.createdAt).toLocaleString()}
+                      {run.createdBy ? ` · ${run.createdBy}` : ''}
+                    </div>
+                  </button>
+                  <button
+                    type="button"
+                    title="Delete saved run"
+                    onClick={() => {
+                      if (window.confirm(`Delete “${run.title}”?`)) {
+                        void deleteResearchRun(run.id);
+                        if (openRunId === run.id) setOpenRunId(null);
+                      }
+                    }}
+                    className="mt-2 text-[11px] text-zinc-600 hover:text-red-300 inline-flex items-center gap-1"
+                  >
+                    <Trash2 size={11} /> Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
 
         <div className="xl:col-span-8 space-y-5">
@@ -281,13 +411,39 @@ const DeepResearch: React.FC = () => {
               </button>
               <span className="text-xs text-zinc-500">
                 {activeModelLabel} · {KIND_META[kind].label}
-                {selectedEntity ? ` · ${selectedEntity.name}` : ''}
+                {selectedEntity ? ` · ${selectedEntity.name}` : ' · No Registry context'}
               </span>
             </div>
           </div>
 
           <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 min-h-[280px]">
-            <h3 className="text-sm font-medium text-blue-400 mb-4">Output</h3>
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <h3 className="text-sm font-medium text-blue-400">Output</h3>
+              {result && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    value={saveTitle}
+                    onChange={(e) => setSaveTitle(e.target.value)}
+                    placeholder="Title for this run"
+                    className="bg-zinc-950 border border-zinc-700 rounded-xl px-3 py-1.5 text-xs w-56 focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleSave}
+                    disabled={saving}
+                    className="px-3 py-1.5 rounded-xl text-xs font-medium bg-zinc-800 hover:bg-zinc-700 border border-zinc-600 inline-flex items-center gap-1.5 disabled:opacity-40"
+                  >
+                    <Bookmark size={12} />
+                    {saving ? 'Saving…' : 'Save this run'}
+                  </button>
+                </div>
+              )}
+            </div>
+            {saveMsg && (
+              <div className="mb-3 text-xs text-emerald-300 bg-emerald-950/30 border border-emerald-900/40 rounded-xl px-3 py-2">
+                {saveMsg}
+              </div>
+            )}
             {error && (
               <div className="mb-4 text-sm text-red-300 bg-red-950/40 border border-red-900/50 rounded-2xl px-4 py-3 whitespace-pre-wrap">
                 {error}
@@ -295,7 +451,8 @@ const DeepResearch: React.FC = () => {
             )}
             {!result && !running && !error && (
               <p className="text-zinc-500 text-sm">
-                Results appear here after Run (PID proxy response text).
+                Results appear here after Run. Save keeps the answer plus model, type, and
+                Registry context.
               </p>
             )}
             {running && (
