@@ -4,11 +4,14 @@
  *
  * Sequencing: Phase 0 (this file) → Phase 1 (revision history / baselines) → Phase 2 (ChangeRequest workflow)
  *
- * Hierarchy (strict four levels):
+ * Hierarchy:
  *   TAR™ (System)
  *    └── Subsystem
- *         └── Component
- *              └── Element  (kind: hardware | software | interface | integrator | other)
+ *         ├── Component
+ *         │    └── Element  (kind: hardware | software | interface | other)
+ *         └── Vertical Integrators (Element kind=integrator, or legacy Capability)
+ *              └── Company  (Element kind=company)
+ *                   └── Product (Element kind=product)
  *
  * Design principles:
  * - Single source of truth hierarchy remains the navigation spine
@@ -49,6 +52,8 @@ export type ElementKind =
   | 'software'
   | 'interface'
   | 'integrator'
+  | 'company'
+  | 'product'
   | 'other';
 
 /** Full set of PLM object types (Phase 0 + forward-looking) */
@@ -172,7 +177,7 @@ export interface ResourceEntity extends RevisionFields, ClassificationFields {
   lifecycleStage?: LifecycleStage;
   /**
    * Only set when type === 'Element'.
-   * Distinguishes hardware / software / interface / integrator / other.
+   * Distinguishes hardware / software / interface / integrator / company / product / other.
    */
   kind?: ElementKind;
 }
@@ -292,7 +297,10 @@ export const RELEASE_STATUS_ORDER: ReleaseStatus[] = [
 export const DEFAULT_REVISION = 'A';
 export const DEFAULT_RELEASE_STATUS: ReleaseStatus = 'Draft';
 
-/** Allowed children by parent type (strict four-level rules) */
+/**
+ * Allowed children by parent type (product structure).
+ * Integrator / company / product nesting is an exception handled in configStore.
+ */
 export const ALLOWED_CHILD_TYPES: Record<StructuralEntityType, StructuralEntityType[]> = {
   System: ['Subsystem'],
   Subsystem: ['Component'],
@@ -305,5 +313,27 @@ export const ELEMENT_KIND_LABEL: Record<ElementKind, string> = {
   software: 'Software',
   interface: 'Interface',
   integrator: 'Integrator',
+  company: 'Company',
+  product: 'Product',
   other: 'Other',
 };
+
+/** Vertical Integrators folder (per-subsystem) or any integrator-kind node. */
+export function isIntegratorContainer(node: {
+  type?: string;
+  kind?: string;
+  name?: string;
+}): boolean {
+  if (!node) return false;
+  if (node.type === 'Capability') return true;
+  if (node.kind === 'integrator') return true;
+  return (node.name || '').trim().toLowerCase() === 'vertical integrators';
+}
+
+export function isCompanyNode(node: { kind?: string }): boolean {
+  return node?.kind === 'company';
+}
+
+export function isProductNode(node: { kind?: string }): boolean {
+  return node?.kind === 'product';
+}

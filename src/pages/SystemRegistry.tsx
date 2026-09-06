@@ -29,6 +29,7 @@ import {
   ArrowUpCircle,
   Bookmark,
   Factory,
+  Building2,
   ChevronUp,
   Trash2,
   Download,
@@ -55,7 +56,11 @@ import {
   getDocumentsError,
 } from '../lib/documentsStore';
 import type { Document, ReleaseStatus, RevisionRecord, ElementKind } from '../types/plm';
-import { ELEMENT_KIND_LABEL } from '../types/plm';
+import {
+  ELEMENT_KIND_LABEL,
+  isCompanyNode,
+  isIntegratorContainer,
+} from '../types/plm';
 import {
   applyOverlay,
   bumpEntityRevision,
@@ -82,7 +87,15 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   Capability: <Zap size={16} className="text-amber-400" />,
 };
 
-const KIND_ORDER: ElementKind[] = ['hardware', 'software', 'interface', 'integrator', 'other'];
+const KIND_ORDER: ElementKind[] = [
+  'hardware',
+  'software',
+  'interface',
+  'integrator',
+  'company',
+  'product',
+  'other',
+];
 
 function elementKindOf(node: { type: string; kind?: string }): ElementKind | null {
   if (node.type === 'Element') return (node.kind as ElementKind) || 'other';
@@ -107,6 +120,10 @@ function kindIcon(kind: ElementKind, size = 14): React.ReactNode {
       return <GitBranch size={size} className="text-sky-400" />;
     case 'integrator':
       return <Factory size={size} className="text-amber-400" />;
+    case 'company':
+      return <Building2 size={size} className="text-amber-300" />;
+    case 'product':
+      return <Box size={size} className="text-amber-200" />;
     default:
       return <Zap size={size} className="text-zinc-500" />;
   }
@@ -187,9 +204,31 @@ const SUBSYSTEM_ACCENT: Record<string, string> = {
   rose: 'border-rose-500/40 bg-rose-950/20',
 };
 
-function nodeMatchesTypeFilter(node: ResourceEntity, typeFilter: EntityType | 'all'): boolean {
+function nodeSelfMatchesTypeFilter(
+  node: ResourceEntity,
+  typeFilter: EntityType | 'Element' | 'all'
+): boolean {
   if (typeFilter === 'all') return true;
   if (node.type === typeFilter) return true;
+  if (typeFilter === 'Element' && node.type === 'Element') return true;
+  if (typeFilter === 'Capability') {
+    const k = elementKindOf(node);
+    return (
+      node.type === 'Capability' ||
+      k === 'integrator' ||
+      k === 'company' ||
+      k === 'product'
+    );
+  }
+  return false;
+}
+
+function nodeMatchesTypeFilter(
+  node: ResourceEntity,
+  typeFilter: EntityType | 'Element' | 'all'
+): boolean {
+  if (typeFilter === 'all') return true;
+  if (nodeSelfMatchesTypeFilter(node, typeFilter)) return true;
   return (node.children || []).some((c) => nodeMatchesTypeFilter(c, typeFilter));
 }
 
@@ -201,7 +240,7 @@ interface TreeNodeProps {
   onToggle: (id: string) => void;
   onSelect: (node: ResourceEntity) => void;
   search: string;
-  typeFilter: EntityType | 'all';
+  typeFilter: EntityType | 'Element' | 'all';
 }
 
 const TreeNode: React.FC<TreeNodeProps> = ({
@@ -230,7 +269,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
   if (!matchesType) return null;
   if (search && !matchesSearch && !hasChildren) return null;
 
-  const isTypeHit = typeFilter === 'all' || node.type === typeFilter;
+  const isTypeHit = nodeSelfMatchesTypeFilter(node, typeFilter);
   const visibleChildren = sortChildren(
     node.id,
     (node.children || []).filter((c) => nodeMatchesTypeFilter(c, typeFilter))
@@ -268,7 +307,10 @@ const TreeNode: React.FC<TreeNodeProps> = ({
         >
           {display.name}
         </span>
-        {(node.type === 'Component' || node.type === 'Subsystem') &&
+        {(node.type === 'Component' ||
+          node.type === 'Subsystem' ||
+          isIntegratorContainer(node) ||
+          isCompanyNode(node)) &&
           collectChildElementKinds(node).length > 0 && (
             <span className="inline-flex items-center gap-0.5 shrink-0 ml-1">
               {collectChildElementKinds(node).map((k) => (
@@ -443,9 +485,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
   const [childType, setChildType] = useState<AddableChildType>(
-    entity.type === 'Component' ? 'Element' : entity.type === 'System' ? 'Subsystem' : 'Component'
+    entity.type === 'Component' || isIntegratorContainer(entity) || isCompanyNode(entity)
+      ? 'Element'
+      : entity.type === 'System'
+        ? 'Subsystem'
+        : 'Component'
   );
-  const [childKind, setChildKind] = useState<ElementKind>('hardware');
+  const [childKind, setChildKind] = useState<ElementKind>(
+    isCompanyNode(entity) ? 'product' : isIntegratorContainer(entity) ? 'company' : 'hardware'
+  );
   const [childDescription, setChildDescription] = useState('');
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
   const [draftType, setDraftType] = useState(entity.type);
@@ -461,14 +509,20 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     entity.type === 'Capability';
 
   const canAddChild =
-    entity.type === 'System' || entity.type === 'Subsystem' || entity.type === 'Component';
+    entity.type === 'System' ||
+    entity.type === 'Subsystem' ||
+    entity.type === 'Component' ||
+    isIntegratorContainer(entity) ||
+    isCompanyNode(entity);
   const canEditType = entity.type === 'Component' || entity.type === 'Element';
   const addableTypes: AddableChildType[] =
     entity.type === 'System'
       ? ['Subsystem']
       : entity.type === 'Subsystem'
         ? ['Component', 'Element']
-        : entity.type === 'Component'
+        : entity.type === 'Component' ||
+            isIntegratorContainer(entity) ||
+            isCompanyNode(entity)
           ? ['Element']
           : [];
 
@@ -485,9 +539,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setChildName('');
     setChildDescription('');
     setChildType(
-      entity.type === 'Component' ? 'Element' : entity.type === 'System' ? 'Subsystem' : 'Component'
+      entity.type === 'Component' || isIntegratorContainer(entity) || isCompanyNode(entity)
+        ? 'Element'
+        : entity.type === 'System'
+          ? 'Subsystem'
+          : 'Component'
     );
-    setChildKind('hardware');
+    setChildKind(
+      isCompanyNode(entity) ? 'product' : isIntegratorContainer(entity) ? 'company' : 'hardware'
+    );
     setPendingRemoveId(null);
   }, [entity.id, entity.name, entity.description, entity.revision, entity.type]);
 
@@ -562,12 +622,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       setChildName('');
       setChildDescription('');
       setChildType(addableTypes[0] || 'Component');
-      setChildKind('hardware');
+      setChildKind(
+        isCompanyNode(entity) ? 'product' : isIntegratorContainer(entity) ? 'company' : 'hardware'
+      );
       setSaveMsg(`Added “${created.name}” under ${entity.name}.`);
       onSelectRelated?.(created.id);
     } else {
       setSaveMsg(
-        'Could not add that child. Under a subsystem use Component or Element; under a component use Element.'
+        'Could not add that child. Under Vertical Integrators add a company; under a company add a product; under a subsystem use Component or Element.'
       );
     }
   };
@@ -893,6 +955,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 <option value="software">Software</option>
                 <option value="interface">Interface</option>
                 <option value="integrator">Integrator</option>
+                <option value="company">Company</option>
+                <option value="product">Product</option>
                 <option value="other">Other</option>
               </select>
             </div>
@@ -1197,7 +1261,11 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         <div>
           <div className="flex items-center justify-between gap-3 mb-3">
             <h4 className="text-sm font-medium text-blue-400">
-              Contained Elements ({entity.children?.length || 0})
+              {isIntegratorContainer(entity)
+                ? `Candidate companies (${entity.children?.length || 0})`
+                : isCompanyNode(entity)
+                  ? `Products (${entity.children?.length || 0})`
+                  : `Contained Elements (${entity.children?.length || 0})`}
             </h4>
             {canAddChild && (
               <button
@@ -1215,11 +1283,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             <div className="mb-4 bg-zinc-950 border border-emerald-900/40 rounded-2xl p-4 space-y-3">
               <p className="text-xs text-zinc-400">
                 Add a child under <span className="text-zinc-200">{entity.name}</span>.
-                {entity.type === 'Subsystem'
-                  ? ' Use Component for assemblies, or Element for a leaf (hardware, software, interface, integrator).'
-                  : entity.type === 'Component'
-                    ? ' Components take Elements (hardware / software / interface / integrator).'
-                    : ' Systems take subsystems.'}
+                {isIntegratorContainer(entity)
+                  ? ' List a company you could vertically integrate, then open it to add its products.'
+                  : isCompanyNode(entity)
+                    ? ' List a product from this company that could integrate into this subsystem.'
+                    : entity.type === 'Subsystem'
+                      ? ' Use Component for assemblies, or Element for a leaf (hardware, software, interface, integrator).'
+                      : entity.type === 'Component'
+                        ? ' Components take Elements (hardware / software / interface / integrator).'
+                        : ' Systems take subsystems.'}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1227,7 +1299,13 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   <input
                     value={childName}
                     onChange={(e) => setChildName(e.target.value)}
-                    placeholder="e.g. Lens barrel assembly"
+                    placeholder={
+                      isIntegratorContainer(entity)
+                        ? 'e.g. Anduril'
+                        : isCompanyNode(entity)
+                          ? 'e.g. Lattice SDK'
+                          : 'e.g. Lens barrel assembly'
+                    }
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                   />
                 </div>
@@ -1253,11 +1331,24 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       onChange={(e) => setChildKind(e.target.value as ElementKind)}
                       className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
                     >
-                      <option value="hardware">Hardware</option>
-                      <option value="software">Software</option>
-                      <option value="interface">Interface</option>
-                      <option value="integrator">Integrator</option>
-                      <option value="other">Other</option>
+                      {isCompanyNode(entity) ? (
+                        <option value="product">Product</option>
+                      ) : isIntegratorContainer(entity) ? (
+                        <>
+                          <option value="company">Company</option>
+                          <option value="product">Product (no company yet)</option>
+                        </>
+                      ) : (
+                        <>
+                          <option value="hardware">Hardware</option>
+                          <option value="software">Software</option>
+                          <option value="interface">Interface</option>
+                          <option value="integrator">Integrator</option>
+                          <option value="company">Company</option>
+                          <option value="product">Product</option>
+                          <option value="other">Other</option>
+                        </>
+                      )}
                     </select>
                   </div>
                 )}
@@ -1303,6 +1394,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 const c = applyOverlay(child);
                 const childRemovable =
                   child.type === 'Component' ||
+                  child.type === 'Element' ||
                   child.type === 'SoftwareItem' ||
                   child.type === 'Interface' ||
                   child.type === 'Capability';
@@ -1449,105 +1541,138 @@ const SubsystemOverviewCard: React.FC<{
       <div className="flex-1 space-y-1.5 min-h-0">
         {children.map((child, index) => {
           const c = applyOverlay(child);
+          const nestedCompanies = isIntegratorContainer(c)
+            ? sortChildren(c.id, c.children || [])
+            : [];
           return (
-            <div
-              key={child.id}
-              className="w-full flex items-center gap-1 px-1 py-1 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group"
-            >
-              <div className="flex flex-col shrink-0">
+            <div key={child.id} className="space-y-1">
+              <div className="w-full flex items-center gap-1 px-1 py-1 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group">
+                <div className="flex flex-col shrink-0">
+                  <button
+                    type="button"
+                    disabled={index === 0}
+                    title="Move up"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveChild(
+                        sub.id,
+                        children.map((ch) => ch.id),
+                        child.id,
+                        -1
+                      );
+                    }}
+                    className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                  >
+                    <ChevronUp size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    disabled={index === children.length - 1}
+                    title="Move down"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      moveChild(
+                        sub.id,
+                        children.map((ch) => ch.id),
+                        child.id,
+                        1
+                      );
+                    }}
+                    className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                  >
+                    <ChevronDown size={12} />
+                  </button>
+                </div>
                 <button
                   type="button"
-                  disabled={index === 0}
-                  title="Move up"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    moveChild(
-                      sub.id,
-                      children.map((ch) => ch.id),
-                      child.id,
-                      -1
-                    );
-                  }}
-                  className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
+                  onClick={() => onOpen(child.id)}
+                  className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
                 >
-                  <ChevronUp size={12} />
-                </button>
-                <button
-                  type="button"
-                  disabled={index === children.length - 1}
-                  title="Move down"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    moveChild(
-                      sub.id,
-                      children.map((ch) => ch.id),
-                      child.id,
-                      1
-                    );
-                  }}
-                  className="p-0.5 text-zinc-500 hover:text-white disabled:opacity-20"
-                >
-                  <ChevronDown size={12} />
-                </button>
-              </div>
-              <button
-                type="button"
-                onClick={() => onOpen(child.id)}
-                className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
-              >
-                <span className="shrink-0" title="Component">
-                  <Package size={14} className="text-zinc-300" />
-                </span>
-                <span className="text-xs text-zinc-300 group-hover:text-white truncate">
-                  {c.name}
-                </span>
-                <span className="flex-1" />
-                {(() => {
-                  const kinds =
-                    collectChildElementKinds(child).length > 0
-                      ? collectChildElementKinds(child)
-                      : displayKindOf(c)
-                        ? [displayKindOf(c) as ElementKind]
-                        : [];
-                  if (!kinds.length) return null;
-                  return (
-                    <span
-                      className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700"
-                      title={kinds.map((k) => ELEMENT_KIND_LABEL[k]).join(', ')}
-                    >
-                      {kinds.map((k) => (
-                        <span key={k} title={ELEMENT_KIND_LABEL[k]}>
-                          {kindIcon(k, 12)}
-                        </span>
-                      ))}
+                  <span className="shrink-0" title={typeBadge(c)}>
+                    {nodeTypeIcon(c, 14)}
+                  </span>
+                  <span className="text-xs text-zinc-300 group-hover:text-white truncate">
+                    {c.name}
+                  </span>
+                  <span className="flex-1" />
+                  {nestedCompanies.length > 0 && (
+                    <span className="text-[10px] text-amber-400/80 shrink-0">
+                      {nestedCompanies.length} co.
                     </span>
-                  );
-                })()}
-                <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
-                <ChevronRight size={12} className="text-zinc-600 shrink-0" />
-              </button>
-              {(child.type === 'Component' ||
-                child.type === 'SoftwareItem' ||
-                child.type === 'Interface' ||
-                child.type === 'Capability') && (
-                <button
-                  type="button"
-                  title="Remove from subsystem"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (
-                      window.confirm(
-                        `Remove “${c.name}” from ${sub.name}? It will leave Registry and Architecture.`
-                      )
-                    ) {
-                      removeChildEntity(child.id);
-                    }
-                  }}
-                  className="p-1.5 text-zinc-600 hover:text-red-300 shrink-0"
-                >
-                  <Trash2 size={12} />
+                  )}
+                  {(() => {
+                    const kinds =
+                      collectChildElementKinds(child).length > 0
+                        ? collectChildElementKinds(child)
+                        : displayKindOf(c)
+                          ? [displayKindOf(c) as ElementKind]
+                          : [];
+                    if (!kinds.length) return null;
+                    return (
+                      <span
+                        className="inline-flex items-center gap-1 shrink-0 px-1.5 py-0.5 rounded-md bg-zinc-900 border border-zinc-700"
+                        title={kinds.map((k) => ELEMENT_KIND_LABEL[k]).join(', ')}
+                      >
+                        {kinds.map((k) => (
+                          <span key={k} title={ELEMENT_KIND_LABEL[k]}>
+                            {kindIcon(k, 12)}
+                          </span>
+                        ))}
+                      </span>
+                    );
+                  })()}
+                  <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
+                  <ChevronRight size={12} className="text-zinc-600 shrink-0" />
                 </button>
-              )}
+                {(child.type === 'Component' ||
+                  child.type === 'Element' ||
+                  child.type === 'SoftwareItem' ||
+                  child.type === 'Interface' ||
+                  child.type === 'Capability') &&
+                  !isIntegratorContainer(c) && (
+                  <button
+                    type="button"
+                    title="Remove from subsystem"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (
+                        window.confirm(
+                          `Remove “${c.name}” from ${sub.name}? It will leave Registry and Architecture.`
+                        )
+                      ) {
+                        removeChildEntity(child.id);
+                      }
+                    }}
+                    className="p-1.5 text-zinc-600 hover:text-red-300 shrink-0"
+                  >
+                    <Trash2 size={12} />
+                  </button>
+                )}
+              </div>
+              {nestedCompanies.map((coRaw) => {
+                const co = applyOverlay(coRaw);
+                const products = co.children || [];
+                return (
+                  <button
+                    key={co.id}
+                    type="button"
+                    onClick={() => onOpen(co.id)}
+                    className="w-full ml-6 flex items-center gap-2 px-2 py-1 rounded-lg bg-zinc-950/40 border border-amber-900/30 hover:border-amber-600/50 text-left group"
+                  >
+                    {nodeTypeIcon(co, 12)}
+                    <span className="text-[11px] text-amber-100/90 group-hover:text-white truncate">
+                      {co.name}
+                    </span>
+                    <span className="flex-1" />
+                    {products.length > 0 && (
+                      <span className="text-[10px] text-zinc-500 shrink-0">
+                        {products.length} product{products.length === 1 ? '' : 's'}
+                      </span>
+                    )}
+                    <ChevronRight size={11} className="text-zinc-600 shrink-0" />
+                  </button>
+                );
+              })}
             </div>
           );
         })}
@@ -1568,7 +1693,7 @@ const SystemRegistry: React.FC = () => {
   const [selectedId, setSelectedId] = useState<string | null>(rootId);
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set([rootId]));
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<EntityType | 'all'>('all');
+  const [typeFilter, setTypeFilter] = useState<EntityType | 'Element' | 'all'>('all');
 
   useEffect(() => {
     const unsubConfig = subscribeConfigStore(() => setHistoryTick((t) => t + 1));
@@ -1783,6 +1908,7 @@ const SystemRegistry: React.FC = () => {
                   'System',
                   'Subsystem',
                   'Component',
+                  'Element',
                   'SoftwareItem',
                   'Interface',
                   'Capability',
@@ -1828,7 +1954,7 @@ const SystemRegistry: React.FC = () => {
               <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-16 text-center">
                 <Eye className="mx-auto text-zinc-600 mb-4" size={40} />
                 <p className="text-zinc-400">
-                  Select a system, subsystem, or component to view details.
+                  Select a system, subsystem, component, or integrator to view details.
                 </p>
               </div>
             )}

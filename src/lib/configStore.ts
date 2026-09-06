@@ -3,8 +3,9 @@
  * Load: Amplify → localStorage cache → seed
  * Save: localStorage + Amplify (verify when possible)
  *
- * Hierarchy (strict four levels):
+ * Hierarchy:
  *   System → Subsystem → Component → Element
+ *   plus Vertical Integrators → Company → Product
  */
 import type {
   Baseline,
@@ -14,7 +15,11 @@ import type {
   RevisionRecord,
   StructuralEntityType,
 } from '../types/plm';
-import { ALLOWED_CHILD_TYPES } from '../types/plm';
+import {
+  ALLOWED_CHILD_TYPES,
+  isCompanyNode,
+  isIntegratorContainer,
+} from '../types/plm';
 import { ALL_ENTITIES, TAR_TREE } from '../data/tarSeedData';
 import { SEED_REVISION_HISTORY } from '../data/revisionSeed';
 import { SEED_BASELINES } from '../data/baselinesSeed';
@@ -38,9 +43,11 @@ export type EntityOverlay = {
 
 /**
  * Types a user may add as a child, depending on parent:
- * - System    → Subsystem
- * - Subsystem → Component
- * - Component → Element
+ * - System                 → Subsystem
+ * - Subsystem              → Component | Element
+ * - Component              → Element
+ * - Vertical Integrators   → Element (company | product)
+ * - Company                → Element (product)
  */
 export type AddableChildType = StructuralEntityType; // constrained at runtime by ALLOWED_CHILD_TYPES
 
@@ -176,20 +183,23 @@ async function pullFromCloud(): Promise<boolean> {
       }
     }
 
-    const extraEntities: ResourceEntity[] = (ex?.data || []).map((row: any) => ({
-      id: row.id,
-      parentId: row.parentId,
-      name: row.name,
-      type: row.type as StructuralEntityType,
-      description: row.description || undefined,
-      revision: row.revision || 'A',
-      status: (row.status as ReleaseStatus) || 'Draft',
-      modifiedBy: row.modifiedBy || undefined,
-      lastModified: row.lastModified,
-      createdAt: row.createdAt,
-      children: [],
-      // kind is seed/local-only for now (ExtraEntity Amplify model has no kind field yet)
-    }));
+    const extraEntities: ResourceEntity[] = (ex?.data || []).map((row: any) => {
+      const unpacked = unpackOverlayNotes(row.description);
+      return {
+        id: row.id,
+        parentId: row.parentId,
+        name: row.name,
+        type: (unpacked.structuralType || row.type) as StructuralEntityType,
+        description: unpacked.notes || undefined,
+        revision: row.revision || 'A',
+        status: (row.status as ReleaseStatus) || 'Draft',
+        modifiedBy: row.modifiedBy || undefined,
+        lastModified: row.lastModified,
+        createdAt: row.createdAt,
+        children: [],
+        kind: unpacked.kind,
+      };
+    });
 
     const extraHistory: RevisionRecord[] = (rev?.data || []).map((row: any) => ({
       id: row.id,
@@ -307,6 +317,15 @@ async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<b
   }
 }
 
+function packExtraDescription(entity: ResourceEntity): string | undefined {
+  const user = entity.description || '';
+  const meta: Record<string, string> = {};
+  if (entity.kind) meta.k = entity.kind;
+  if (entity.type) meta.st = entity.type;
+  if (!Object.keys(meta).length) return entity.description;
+  return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
+}
+
 async function upsertExtraEntityCloud(entity: ResourceEntity): Promise<boolean> {
   const client = getProductClient();
   if (!client?.models?.ExtraEntity) return false;
@@ -315,7 +334,7 @@ async function upsertExtraEntityCloud(entity: ResourceEntity): Promise<boolean> 
     parentId: entity.parentId || '',
     name: entity.name,
     type: entity.type,
-    description: entity.description,
+    description: packExtraDescription(entity),
     revision: entity.revision,
     status: entity.status,
     modifiedBy: entity.modifiedBy,
@@ -531,9 +550,30 @@ function slugify(name: string): string {
   );
 }
 
+function allowedChildTypesFor(parent: ResourceEntity): StructuralEntityType[] {
+  if (isIntegratorContainer(parent) || isCompanyNode(parent)) return ['Element'];
+  if (parent.type === 'Subsystem') return ['Component', 'Element'];
+  if (parent.type === 'Component') return ['Element'];
+  return ALLOWED_CHILD_TYPES[parent.type] || [];
+}
+
+function resolvedChildKind(
+  parent: ResourceEntity,
+  inputType: StructuralEntityType,
+  requested?: ElementKind
+): ElementKind | undefined {
+  if (inputType !== 'Element') return undefined;
+  if (isCompanyNode(parent)) return 'product';
+  if (isIntegratorContainer(parent)) {
+    return requested === 'product' ? 'product' : 'company';
+  }
+  return requested;
+}
+
 /**
- * Add a child under parentId, enforcing strict four-level hierarchy:
- *   System → Subsystem → Component → Element
+ * Add a child under parentId.
+ * Product structure: System → Subsystem → Component → Element
+ * Integrator branch: Vertical Integrators → Company → Product
  */
 export function addChildEntity(
   parentId: string,
@@ -549,12 +589,7 @@ export function addChildEntity(
   const parent = getEntityById(parentId) || ALL_ENTITIES.find((e) => e.id === parentId);
   if (!parent) return null;
 
-  const allowed =
-    parent.type === 'Subsystem'
-      ? (['Component', 'Element'] as StructuralEntityType[])
-      : parent.type === 'Component'
-        ? (['Element'] as StructuralEntityType[])
-        : ALLOWED_CHILD_TYPES[parent.type] || [];
+  const allowed = allowedChildTypesFor(parent);
   if (!allowed.includes(input.type)) {
     console.warn(
       `[configStore] cannot add ${input.type} under ${parent.type} (${parent.id}). Allowed: ${allowed.join(', ') || 'none'}`
@@ -565,7 +600,8 @@ export function addChildEntity(
   const name = input.name.trim();
   if (!name) return null;
 
-  if (input.type === 'Element' && !input.kind) {
+  const kind = resolvedChildKind(parent, input.type, input.kind);
+  if (input.type === 'Element' && !kind) {
     console.warn('[configStore] Element requires a kind');
     return null;
   }
@@ -586,7 +622,7 @@ export function addChildEntity(
     lastModified: now,
     modifiedBy: by,
     children: [],
-    ...(input.type === 'Element' && input.kind ? { kind: input.kind } : {}),
+    ...(kind ? { kind } : {}),
   };
 
   state = {
