@@ -462,6 +462,88 @@ const RegistrySupplierLine: React.FC<{ entity: ResourceEntity }> = ({ entity }) 
   );
 };
 
+function SubsystemIntegratorRollup({
+  sub,
+  onOpen,
+}: {
+  sub: ResourceEntity;
+  onOpen: (id: string) => void;
+}) {
+  const integratorGroups = collectIntegratorGroups(sub);
+  const integratorCount = integratorGroups.reduce((n, g) => n + g.integrators.length, 0);
+  return (
+    <div className="mt-4 pt-3 border-t border-amber-900/30">
+      <div className="flex items-center gap-2 mb-2">
+        <Factory size={13} className="text-amber-400 shrink-0" />
+        <h4 className="text-[11px] font-medium uppercase tracking-wider text-amber-300/90">
+          Vertical Integrators
+        </h4>
+        <span className="text-[10px] text-zinc-600">
+          {integratorCount === 0
+            ? 'none yet'
+            : `${integratorCount} across ${integratorGroups.length} part${
+                integratorGroups.length === 1 ? '' : 's'
+              }`}
+        </span>
+        <Link
+          to="/suppliers"
+          className="ml-auto text-[10px] text-zinc-500 hover:text-amber-200"
+        >
+          Suppliers
+        </Link>
+      </div>
+      {integratorGroups.length === 0 ? (
+        <p className="text-[11px] text-zinc-600 leading-snug">
+          Add companies on each component or element. They collect here in constituent order.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {integratorGroups.map((group) => {
+            const owner = applyOverlay(group.owner);
+            return (
+              <div key={owner.id}>
+                <button
+                  type="button"
+                  onClick={() => onOpen(owner.id)}
+                  className="text-[10px] text-zinc-500 hover:text-zinc-300 truncate max-w-full"
+                >
+                  {owner.name}
+                </button>
+                <div className="space-y-1 mt-0.5">
+                  {group.integrators.map((raw) => {
+                    const co = applyOverlay(raw);
+                    const products = (co.children || []).map((p) => applyOverlay(p));
+                    return (
+                      <button
+                        key={co.id}
+                        type="button"
+                        onClick={() => onOpen(co.id)}
+                        className="w-full flex items-center gap-2 px-2 py-1 rounded-lg bg-zinc-950/50 border border-amber-900/25 hover:border-amber-600/50 text-left group"
+                      >
+                        {nodeTypeIcon(co, 12)}
+                        <span className="text-[11px] text-amber-100/90 group-hover:text-white truncate">
+                          {co.name}
+                        </span>
+                        <span className="flex-1" />
+                        {products.length > 0 && (
+                          <span className="text-[10px] text-zinc-500 truncate max-w-[45%]">
+                            {products.map((p) => p.name).join(' · ')}
+                          </span>
+                        )}
+                        <ChevronRight size={11} className="text-zinc-600 shrink-0" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface ComponentCardProps {
   entity: ResourceEntity;
   onSelectRelated?: (id: string) => void;
@@ -1815,6 +1897,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </div>
       )}
 
+      {entity.type === 'Subsystem' && (
+        <SubsystemIntegratorRollup sub={entity} onOpen={(id) => onSelectRelated?.(id)} />
+      )}
+
       <div className="pt-4 border-t border-zinc-800 flex flex-wrap gap-4 text-xs text-zinc-500">
         {entity.createdAt && (
           <span>Created: {new Date(entity.createdAt).toLocaleDateString()}</span>
@@ -2019,69 +2105,7 @@ const SubsystemOverviewCard: React.FC<{
         })}
       </div>
 
-      <div className="mt-4 pt-3 border-t border-amber-900/30">
-        <div className="flex items-center gap-2 mb-2">
-          <Factory size={13} className="text-amber-400 shrink-0" />
-          <h4 className="text-[11px] font-medium uppercase tracking-wider text-amber-300/90">
-            Vertical Integrators
-          </h4>
-          <span className="text-[10px] text-zinc-600">
-            {integratorCount === 0
-              ? 'none yet'
-              : `${integratorCount} across ${integratorGroups.length} part${
-                  integratorGroups.length === 1 ? '' : 's'
-                }`}
-          </span>
-        </div>
-        {integratorGroups.length === 0 ? (
-          <p className="text-[11px] text-zinc-600 leading-snug">
-            Add companies on each component or element. They collect here in constituent order.
-          </p>
-        ) : (
-          <div className="space-y-2">
-            {integratorGroups.map((group) => {
-              const owner = applyOverlay(group.owner);
-              return (
-                <div key={owner.id}>
-                  <button
-                    type="button"
-                    onClick={() => onOpen(owner.id)}
-                    className="text-[10px] text-zinc-500 hover:text-zinc-300 truncate max-w-full"
-                  >
-                    {owner.name}
-                  </button>
-                  <div className="space-y-1 mt-0.5">
-                    {group.integrators.map((raw) => {
-                      const co = applyOverlay(raw);
-                      const products = (co.children || []).map((p) => applyOverlay(p));
-                      return (
-                        <button
-                          key={co.id}
-                          type="button"
-                          onClick={() => onOpen(co.id)}
-                          className="w-full flex items-center gap-2 px-2 py-1 rounded-lg bg-zinc-950/50 border border-amber-900/25 hover:border-amber-600/50 text-left group"
-                        >
-                          {nodeTypeIcon(co, 12)}
-                          <span className="text-[11px] text-amber-100/90 group-hover:text-white truncate">
-                            {co.name}
-                          </span>
-                          <span className="flex-1" />
-                          {products.length > 0 && (
-                            <span className="text-[10px] text-zinc-500 truncate max-w-[45%]">
-                              {products.map((p) => p.name).join(' · ')}
-                            </span>
-                          )}
-                          <ChevronRight size={11} className="text-zinc-600 shrink-0" />
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
+      <SubsystemIntegratorRollup sub={sub} onOpen={onOpen} />
     </div>
   );
 };
