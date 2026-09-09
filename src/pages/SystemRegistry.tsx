@@ -156,6 +156,44 @@ function countElementKind(node: ResourceEntity, kind: ElementKind): number {
   return n;
 }
 
+function sourcingChildrenOf(node: ResourceEntity): ResourceEntity[] {
+  return sortChildren(
+    node.id,
+    (node.children || []).filter((c) => isSourcingNode(applyOverlay(c)))
+  );
+}
+
+/** Integrator groups for a subsystem card, in constituent order (component then its elements). */
+function collectIntegratorGroups(
+  sub: ResourceEntity
+): { owner: ResourceEntity; integrators: ResourceEntity[] }[] {
+  const groups: { owner: ResourceEntity; integrators: ResourceEntity[] }[] = [];
+  const kids = sortChildren(sub.id, sub.children || []);
+  let folderGroup: { owner: ResourceEntity; integrators: ResourceEntity[] } | null = null;
+
+  const consider = (node: ResourceEntity) => {
+    const integrators = sourcingChildrenOf(node);
+    if (integrators.length) groups.push({ owner: node, integrators });
+  };
+
+  for (const child of kids) {
+    const c = applyOverlay(child);
+    if (isIntegratorContainer(c)) {
+      const integrators = sourcingChildrenOf(c);
+      if (integrators.length) folderGroup = { owner: c, integrators };
+      continue;
+    }
+    consider(c);
+    for (const grand of sortChildren(c.id, c.children || [])) {
+      const g = applyOverlay(grand);
+      if (isSourcingNode(g)) continue;
+      consider(g);
+    }
+  }
+  if (folderGroup) groups.push(folderGroup);
+  return groups;
+}
+
 const TYPE_LABEL: Record<string, string> = {
   System: 'System',
   Subsystem: 'Subsystem',
@@ -1706,6 +1744,8 @@ const SubsystemOverviewCard: React.FC<{
   const sub = applyOverlay(rawSub);
   const accent = SUBSYSTEM_ACCENT[SUBSYSTEM_COLORS[sub.id] || 'sky'] || 'border-zinc-700 bg-zinc-900';
   const children = sortChildren(sub.id, sub.children || []);
+  const integratorGroups = collectIntegratorGroups(sub);
+  const integratorCount = integratorGroups.reduce((n, g) => n + g.integrators.length, 0);
 
   return (
     <div className={`border rounded-3xl p-5 flex flex-col ${accent}`}>
@@ -1756,6 +1796,12 @@ const SubsystemOverviewCard: React.FC<{
         <span className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
           Rev {sub.revision}
         </span>
+        {integratorCount > 0 && (
+          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-950 border border-amber-900/40 text-amber-300/80">
+            <Factory size={11} />
+            {integratorCount} VI
+          </span>
+        )}
       </div>
 
       <div className="flex-1 space-y-1.5 min-h-0">
@@ -1877,33 +1923,73 @@ const SubsystemOverviewCard: React.FC<{
                   </button>
                 )}
               </div>
-              {nestedCompanies.map((coRaw) => {
-                const co = applyOverlay(coRaw);
-                const products = co.children || [];
-                return (
-                  <button
-                    key={co.id}
-                    type="button"
-                    onClick={() => onOpen(co.id)}
-                    className="w-full ml-6 flex items-center gap-2 px-2 py-1 rounded-lg bg-zinc-950/40 border border-amber-900/30 hover:border-amber-600/50 text-left group"
-                  >
-                    {nodeTypeIcon(co, 12)}
-                    <span className="text-[11px] text-amber-100/90 group-hover:text-white truncate">
-                      {co.name}
-                    </span>
-                    <span className="flex-1" />
-                    {products.length > 0 && (
-                      <span className="text-[10px] text-zinc-500 shrink-0">
-                        {products.length} product{products.length === 1 ? '' : 's'}
-                      </span>
-                    )}
-                    <ChevronRight size={11} className="text-zinc-600 shrink-0" />
-                  </button>
-                );
-              })}
             </div>
           );
         })}
+      </div>
+
+      <div className="mt-4 pt-3 border-t border-amber-900/30">
+        <div className="flex items-center gap-2 mb-2">
+          <Factory size={13} className="text-amber-400 shrink-0" />
+          <h4 className="text-[11px] font-medium uppercase tracking-wider text-amber-300/90">
+            Vertical Integrators
+          </h4>
+          <span className="text-[10px] text-zinc-600">
+            {integratorCount === 0
+              ? 'none yet'
+              : `${integratorCount} across ${integratorGroups.length} part${
+                  integratorGroups.length === 1 ? '' : 's'
+                }`}
+          </span>
+        </div>
+        {integratorGroups.length === 0 ? (
+          <p className="text-[11px] text-zinc-600 leading-snug">
+            Add companies on each component or element. They collect here in constituent order.
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {integratorGroups.map((group) => {
+              const owner = applyOverlay(group.owner);
+              return (
+                <div key={owner.id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(owner.id)}
+                    className="text-[10px] text-zinc-500 hover:text-zinc-300 truncate max-w-full"
+                  >
+                    {owner.name}
+                  </button>
+                  <div className="space-y-1 mt-0.5">
+                    {group.integrators.map((raw) => {
+                      const co = applyOverlay(raw);
+                      const products = (co.children || []).map((p) => applyOverlay(p));
+                      return (
+                        <button
+                          key={co.id}
+                          type="button"
+                          onClick={() => onOpen(co.id)}
+                          className="w-full flex items-center gap-2 px-2 py-1 rounded-lg bg-zinc-950/50 border border-amber-900/25 hover:border-amber-600/50 text-left group"
+                        >
+                          {nodeTypeIcon(co, 12)}
+                          <span className="text-[11px] text-amber-100/90 group-hover:text-white truncate">
+                            {co.name}
+                          </span>
+                          <span className="flex-1" />
+                          {products.length > 0 && (
+                            <span className="text-[10px] text-zinc-500 truncate max-w-[45%]">
+                              {products.map((p) => p.name).join(' · ')}
+                            </span>
+                          )}
+                          <ChevronRight size={11} className="text-zinc-600 shrink-0" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );
