@@ -38,7 +38,10 @@ import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childO
 import {
   getSuppliersForEntity,
   getSuppliers,
+  getSupplierById,
   subscribeSuppliersStore,
+  ensureSupplierForPart,
+  unlinkSupplierFromEntity,
 } from '../lib/suppliersStore';
 import {
   ResourceEntity,
@@ -73,6 +76,7 @@ import {
   removeChildEntity,
   getRegistryTree,
   getMergedAllEntities,
+  getEntityById,
   type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
@@ -164,6 +168,18 @@ function sourcingChildrenOf(node: ResourceEntity): ResourceEntity[] {
 }
 
 /** Integrator groups for a subsystem card, in constituent order (component then its elements). */
+function findSubsystemId(start: ResourceEntity): string | undefined {
+  const all = getMergedAllEntities();
+  let cur: ResourceEntity | undefined = start;
+  const seen = new Set<string>();
+  while (cur && !seen.has(cur.id)) {
+    seen.add(cur.id);
+    if (cur.type === 'Subsystem') return cur.id;
+    cur = all.find((e) => e.id === cur.parentId);
+  }
+  return undefined;
+}
+
 function collectIntegratorGroups(
   sub: ResourceEntity
 ): { owner: ResourceEntity; integrators: ResourceEntity[] }[] {
@@ -497,10 +513,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     [entity.id, docsTick]
   );
 
+  const [suppliersTick, setSuppliersTick] = useState(0);
   useEffect(() => {
-    const unsub = subscribeDocumentsStore(() => setDocsTick((t) => t + 1));
+    const unsubDocs = subscribeDocumentsStore(() => setDocsTick((t) => t + 1));
+    const unsubSup = subscribeSuppliersStore(() => setSuppliersTick((t) => t + 1));
     void hydrateDocumentsStoreFromCloud();
-    return unsub;
+    return () => {
+      unsubDocs();
+      unsubSup();
+    };
   }, []);
 
   const history: RevisionRecord[] = useMemo(
@@ -537,6 +558,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [childDescription, setChildDescription] = useState('');
   const [showAddIntegrator, setShowAddIntegrator] = useState(false);
   const [integratorName, setIntegratorName] = useState('');
+  const [integratorSupplierId, setIntegratorSupplierId] = useState('');
   const [integratorProduct, setIntegratorProduct] = useState('');
   const [integratorDescription, setIntegratorDescription] = useState('');
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
@@ -597,6 +619,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setChildDescription('');
     setShowAddIntegrator(false);
     setIntegratorName('');
+    setIntegratorSupplierId('');
     setIntegratorProduct('');
     setIntegratorDescription('');
     setChildType(
@@ -696,13 +719,37 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   };
 
   const handleAddIntegrator = () => {
-    const companyName = integratorName.trim();
+    const selected = integratorSupplierId
+      ? getSupplierById(integratorSupplierId)
+      : undefined;
+    const companyName = (selected?.name || integratorName).trim();
     if (!companyName) return;
-    const company = addChildEntity(entity.id, {
+
+    const already = integratorChildren.some((c) => {
+      const n = applyOverlay(c);
+      if (n.name.trim().toLowerCase() === companyName.toLowerCase()) return true;
+      if (selected && n.relatedIds && n.relatedIds[0] === selected.id) return true;
+      return false;
+    });
+    if (already) {
+      setSaveMsg(`“${companyName}” is already listed on this part.`);
+      return;
+    }
+
+    const supplier = ensureSupplierForPart({
       name: companyName,
+      entityId: entity.id,
+      subsystemId: findSubsystemId(entity),
+      notes: integratorDescription.trim() || undefined,
+      existingId: selected?.id,
+    });
+
+    const company = addChildEntity(entity.id, {
+      name: supplier.name,
       type: 'Element',
       description: integratorDescription,
       kind: 'company',
+      relatedIds: [supplier.id],
     });
     if (!company) {
       setSaveMsg('Could not add that integrator under this part.');
@@ -719,19 +766,23 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     }
     setShowAddIntegrator(false);
     setIntegratorName('');
+    setIntegratorSupplierId('');
     setIntegratorProduct('');
     setIntegratorDescription('');
     setSaveMsg(
       productName
-        ? `Added integrator “${company.name}” / “${productName}” under ${entity.name}.`
-        : `Added integrator “${company.name}” under ${entity.name}.`
+        ? `Linked “${company.name}” / “${productName}” from Suppliers.`
+        : `Linked “${company.name}” from Suppliers.`
     );
   };
 
   const handleRemove = (id: string, parentId?: string) => {
+    const current = getEntityById(id);
+    const supplierId = current?.relatedIds && current.relatedIds[0];
     const removed = removeChildEntity(id);
     setPendingRemoveId(null);
     if (removed) {
+      if (supplierId) unlinkSupplierFromEntity(supplierId, entity.id);
       setSaveMsg(`Removed “${removed.name}”.`);
       if (id === entity.id) {
         const next = parentId || entity.parentId;
@@ -1566,6 +1617,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             <h4 className="text-sm font-medium text-amber-400 flex items-center gap-2">
               <Factory size={14} />
               Vertical Integrators ({integratorChildren.length})
+              <Link
+                to="/suppliers"
+                className="text-[10px] font-normal text-zinc-500 hover:text-amber-200"
+              >
+                Suppliers page
+              </Link>
             </h4>
             <button
               type="button"
@@ -1577,18 +1634,47 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             </button>
           </div>
           <p className="text-[11px] text-zinc-500 mb-3">
-            Candidate companies and products that could vertically integrate into{' '}
-            <span className="text-zinc-300">{entity.name}</span>. Not a costed part.
+            Pick an existing supplier or type a new company. New names are added to the{' '}
+            <Link to="/suppliers" className="text-amber-200/80 hover:text-amber-100">
+              Suppliers
+            </Link>{' '}
+            page as Integrators.
           </p>
 
           {showAddIntegrator && (
             <div className="mb-4 bg-zinc-950 border border-amber-900/40 rounded-2xl p-4 space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="text-[11px] text-zinc-500 block mb-1">
+                    Existing supplier
+                  </label>
+                  <select
+                    value={integratorSupplierId}
+                    onChange={(e) => {
+                      const id = e.target.value;
+                      setIntegratorSupplierId(id);
+                      const s = id ? getSupplierById(id) : undefined;
+                      if (s) setIntegratorName(s.name);
+                    }}
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                  >
+                    <option value="">— Type a new company below —</option>
+                    {getSuppliers().map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                        {s.kind ? ` · ${s.kind}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="text-[11px] text-zinc-500 block mb-1">Company</label>
                   <input
                     value={integratorName}
-                    onChange={(e) => setIntegratorName(e.target.value)}
+                    onChange={(e) => {
+                      setIntegratorName(e.target.value);
+                      setIntegratorSupplierId('');
+                    }}
                     placeholder="e.g. Anduril"
                     className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
                   />
@@ -1621,10 +1707,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 <button
                   type="button"
                   onClick={handleAddIntegrator}
-                  disabled={!integratorName.trim()}
+                  disabled={!integratorName.trim() && !integratorSupplierId}
                   className={
                     'px-4 py-2 rounded-xl text-sm font-medium ' +
-                    (integratorName.trim()
+                    (integratorName.trim() || integratorSupplierId
                       ? 'bg-amber-600 hover:bg-amber-500 text-white'
                       : 'bg-zinc-800 text-zinc-500 cursor-not-allowed')
                   }
@@ -1664,6 +1750,11 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                         <span className="text-sm font-medium text-white group-hover:text-amber-200 truncate">
                           {c.name}
                         </span>
+                        {c.relatedIds && c.relatedIds[0] && getSupplierById(c.relatedIds[0]) && (
+                          <span className="text-[10px] text-amber-500/80 shrink-0">
+                            {getSupplierById(c.relatedIds[0])?.kind}
+                          </span>
+                        )}
                         <span className="text-[10px] text-zinc-600 ml-auto">
                           Rev {c.revision}
                         </span>

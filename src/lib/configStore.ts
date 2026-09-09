@@ -199,6 +199,7 @@ async function pullFromCloud(): Promise<boolean> {
         createdAt: row.createdAt,
         children: [],
         kind: unpacked.kind,
+        relatedIds: unpacked.supplierId ? [unpacked.supplierId] : undefined,
       };
     });
 
@@ -272,16 +273,18 @@ function unpackOverlayNotes(raw: string | undefined | null): {
   notes?: string;
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
+  supplierId?: string;
 } {
   if (!raw) return {};
   const m = raw.match(PLM_META_RE);
   if (!m) return { notes: raw };
   try {
-    const meta = JSON.parse(m[1]) as { st?: string; k?: string };
+    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string };
     return {
       notes: raw.slice(m[0].length) || undefined,
       structuralType: meta.st as StructuralEntityType | undefined,
       kind: meta.k as ElementKind | undefined,
+      supplierId: meta.sid,
     };
   } catch {
     return { notes: raw };
@@ -323,6 +326,7 @@ function packExtraDescription(entity: ResourceEntity): string | undefined {
   const meta: Record<string, string> = {};
   if (entity.kind) meta.k = entity.kind;
   if (entity.type) meta.st = entity.type;
+  if (entity.relatedIds && entity.relatedIds[0]) meta.sid = entity.relatedIds[0];
   if (!Object.keys(meta).length) return entity.description;
   return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
 }
@@ -592,6 +596,8 @@ export function addChildEntity(
     createdBy?: string;
     /** Required when type === 'Element' */
     kind?: ElementKind;
+    /** Linked supplier id (Vertical Integrator ↔ Suppliers page) */
+    relatedIds?: string[];
   }
 ): ResourceEntity | null {
   const parent = getEntityById(parentId) || ALL_ENTITIES.find((e) => e.id === parentId);
@@ -631,6 +637,9 @@ export function addChildEntity(
     modifiedBy: by,
     children: [],
     ...(kind ? { kind } : {}),
+    ...(input.relatedIds && input.relatedIds.length
+      ? { relatedIds: input.relatedIds }
+      : {}),
   };
 
   state = {

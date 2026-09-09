@@ -147,6 +147,52 @@ export function getSupplierById(id: string): Supplier | undefined {
   return state.suppliers.find((s) => s.id === id);
 }
 
+export function findSupplierByName(name: string): Supplier | undefined {
+  const n = name.trim().toLowerCase();
+  if (!n) return undefined;
+  return state.suppliers.find((s) => s.name.trim().toLowerCase() === n);
+}
+
+/**
+ * Find or create a supplier and attach it to a Registry part.
+ * New names are stored as kind Integrator so they show on the Suppliers page.
+ */
+export function ensureSupplierForPart(opts: {
+  name: string;
+  entityId: string;
+  subsystemId?: string;
+  notes?: string;
+  existingId?: string;
+}): Supplier {
+  const name = opts.name.trim();
+  let s =
+    (opts.existingId ? getSupplierById(opts.existingId) : undefined) ||
+    findSupplierByName(name);
+
+  if (!s) {
+    return upsertSupplier({
+      name,
+      kind: 'Integrator',
+      engagement: 'Identified',
+      notes: opts.notes,
+      entityIds: [opts.entityId],
+      subsystemIds: opts.subsystemId ? [opts.subsystemId] : [],
+    });
+  }
+
+  if (!s.entityIds.includes(opts.entityId)) {
+    linkSupplierToEntity(s.id, opts.entityId);
+  }
+  if (opts.subsystemId && !(s.subsystemIds || []).includes(opts.subsystemId)) {
+    s = upsertSupplier({
+      ...s,
+      name: s.name,
+      subsystemIds: [...(s.subsystemIds || []), opts.subsystemId],
+    });
+  }
+  return getSupplierById(s.id) || s;
+}
+
 export function getSuppliersForEntity(entityId: string): Supplier[] {
   return state.suppliers.filter((s) => s.entityIds.includes(entityId));
 }
