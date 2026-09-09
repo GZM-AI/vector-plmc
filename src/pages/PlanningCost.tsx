@@ -17,7 +17,6 @@ import {
 import type { ResourceEntity } from '../types/plm';
 import {
   getPlanLine,
-  upsertPlanLine,
   upsertTier,
   lineTotal,
   tierTotal,
@@ -101,7 +100,6 @@ function PartBlock({
   tick: number;
 }) {
   const line = useMemo(() => getPlanLine(entity.id), [entity.id, tick]);
-  const patchLine = (p: Parameters<typeof upsertPlanLine>[1]) => upsertPlanLine(entity.id, p);
 
   return (
     <>
@@ -119,49 +117,10 @@ function PartBlock({
             </Link>
           </div>
         </td>
-        <td colSpan={4} className="text-[10px] text-zinc-600 px-2">
-          Working {formatMoney(lineTotal(line))}
+        <td colSpan={8} className="text-[10px] text-zinc-600 px-2">
+          Working {formatMoney(lineTotal(line))} · Actual if present, else Quoted, else Estimated
         </td>
-        <td className="p-1.5 w-32">
-          <select
-            value={line.status}
-            onChange={(e) => patchLine({ status: e.target.value as PlanStatus })}
-            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}
-              </option>
-            ))}
-          </select>
-        </td>
-        <td className="p-1.5 w-36">
-          <input
-            type="date"
-            value={line.startDate || ''}
-            onChange={(e) => patchLine({ startDate: e.target.value })}
-            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          />
-        </td>
-        <td className="p-1.5 w-36">
-          <input
-            type="date"
-            value={line.endDate || ''}
-            onChange={(e) => patchLine({ endDate: e.target.value })}
-            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          />
-        </td>
-        <td className="py-2 px-2 text-sm text-right text-zinc-200 tabular-nums whitespace-nowrap">
-          {formatMoney(lineTotal(line))}
-        </td>
-        <td className="p-1.5 min-w-[140px]">
-          <input
-            value={line.note}
-            onChange={(e) => patchLine({ note: e.target.value })}
-            placeholder="Vendor / quote…"
-            className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
-          />
-        </td>
+        <td />
       </tr>
       {COST_TIERS.map((tier) => {
         const v = line.tiers[tier];
@@ -188,11 +147,48 @@ function PartBlock({
                 onChange={(n) => upsertTier(entity.id, tier, { leadTimeDays: n })}
               />
             </td>
-            <td colSpan={3} />
+            <td className="p-1 w-32">
+              <select
+                value={v.status || 'Not started'}
+                onChange={(e) =>
+                  upsertTier(entity.id, tier, { status: e.target.value as PlanStatus })
+                }
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
+              >
+                {STATUS_OPTIONS.map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </td>
+            <td className="p-1 w-36">
+              <input
+                type="date"
+                value={v.startDate || ''}
+                onChange={(e) => upsertTier(entity.id, tier, { startDate: e.target.value })}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
+              />
+            </td>
+            <td className="p-1 w-36">
+              <input
+                type="date"
+                value={v.endDate || ''}
+                onChange={(e) => upsertTier(entity.id, tier, { endDate: e.target.value })}
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
+              />
+            </td>
             <td className={`py-1.5 px-2 text-xs text-right tabular-nums ${TIER_STYLE[tier]}`}>
               {formatMoney(tierTotal(v))}
             </td>
-            <td />
+            <td className="p-1 min-w-[140px]">
+              <input
+                value={v.note || ''}
+                onChange={(e) => upsertTier(entity.id, tier, { note: e.target.value })}
+                placeholder="Vendor / quote…"
+                className="w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
+              />
+            </td>
           </tr>
         );
       })}

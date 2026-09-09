@@ -17,6 +17,10 @@ export type TierValues = {
   unitCost: number;
   qty: number;
   leadTimeDays: number;
+  status: PlanStatus;
+  startDate: string;
+  endDate: string;
+  note: string;
 };
 
 export type PlanLine = {
@@ -34,7 +38,16 @@ const TIERS_META_RE = /^\[\[plan-tiers\]\](\{[^]*?\})\n?/;
 type StoreState = { lines: Record<string, PlanLine> };
 
 function emptyTier(): TierValues {
-  return { nre: 0, unitCost: 0, qty: 1, leadTimeDays: 0 };
+  return {
+    nre: 0,
+    unitCost: 0,
+    qty: 1,
+    leadTimeDays: 0,
+    status: 'Not started',
+    startDate: '',
+    endDate: '',
+    note: '',
+  };
 }
 
 function emptyTiers(): Record<CostTier, TierValues> {
@@ -67,6 +80,10 @@ function parseTiersJson(raw: unknown): Record<CostTier, TierValues> | null {
       unitCost: Number(v.unitCost) || 0,
       qty: Number.isFinite(Number(v.qty)) ? Number(v.qty) : 1,
       leadTimeDays: Number(v.leadTimeDays) || 0,
+      status: (v.status as PlanStatus) || 'Not started',
+      startDate: v.startDate || '',
+      endDate: v.endDate || '',
+      note: v.note || '',
     };
   }
   return out;
@@ -119,6 +136,15 @@ export function normalizePlanLine(raw: any, entityId: string): PlanLine {
       unitCost: Number(raw?.unitCost) || 0,
       qty: Number.isFinite(Number(raw?.qty)) ? Number(raw.qty) : 1,
       leadTimeDays: Number(raw?.leadTimeDays) || 0,
+      status: (raw?.status as PlanStatus) || 'Not started',
+      startDate: raw?.startDate || '',
+      endDate: raw?.endDate || '',
+      note:
+        unpacked.tiers
+          ? unpacked.note
+          : raw?.note && !String(raw.note).startsWith('[[plan-tiers]]')
+            ? String(raw.note)
+            : unpacked.note,
     };
   }
   return {
@@ -291,12 +317,18 @@ export function upsertTier(
   const prev = getPlanLine(entityId);
   const cur = prev.tiers[tier];
   const nextTier: TierValues = {
+    ...emptyTier(),
+    ...cur,
     nre: Number.isFinite(patch.nre as number) ? Number(patch.nre) : cur.nre,
     unitCost: Number.isFinite(patch.unitCost as number) ? Number(patch.unitCost) : cur.unitCost,
     qty: Number.isFinite(patch.qty as number) ? Math.max(0, Number(patch.qty)) : cur.qty,
     leadTimeDays: Number.isFinite(patch.leadTimeDays as number)
       ? Math.max(0, Number(patch.leadTimeDays))
       : cur.leadTimeDays,
+    status: patch.status !== undefined ? patch.status : cur.status || 'Not started',
+    startDate: patch.startDate !== undefined ? patch.startDate : cur.startDate || '',
+    endDate: patch.endDate !== undefined ? patch.endDate : cur.endDate || '',
+    note: patch.note !== undefined ? patch.note : cur.note || '',
   };
   return upsertPlanLine(entityId, {
     tiers: { ...prev.tiers, [tier]: nextTier },
