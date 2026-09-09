@@ -337,3 +337,30 @@ export function isCompanyNode(node: { kind?: string }): boolean {
 export function isProductNode(node: { kind?: string }): boolean {
   return node?.kind === 'product';
 }
+
+/** Integrator folder, company, or product — sourcing, not design structure. */
+export function isSourcingNode(node: {
+  type?: string;
+  kind?: string;
+  name?: string;
+}): boolean {
+  return isIntegratorContainer(node) || isCompanyNode(node) || isProductNode(node);
+}
+
+/**
+ * Design parts that can carry their own Vertical Integrators list
+ * (companies / products as children, without becoming a folder themselves).
+ */
+export function canAttachIntegrators(node: {
+  type?: string;
+  kind?: string;
+  name?: string;
+}): boolean {
+  if (!node || isSourcingNode(node)) return false;
+  return (
+    node.type === 'Component' ||
+    node.type === 'Element' ||
+    node.type === 'SoftwareItem' ||
+    node.type === 'Interface'
+  );
+}

@@ -229,7 +229,7 @@ export function collectCostableUnder(node: ResourceEntity): ResourceEntity[] {
   const out: ResourceEntity[] = [];
   const walk = (n: ResourceEntity) => {
     if (isSourcingBranch(n)) return;
-    const kids = n.children || [];
+    const kids = (n.children || []).filter((k) => !isSourcingBranch(k));
     if (kids.length === 0) {
       if (n.type !== 'System' && n.type !== 'Subsystem') out.push(n);
       return;

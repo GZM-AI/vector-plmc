@@ -17,6 +17,7 @@ import type {
 } from '../types/plm';
 import {
   ALLOWED_CHILD_TYPES,
+  canAttachIntegrators,
   isCompanyNode,
   isIntegratorContainer,
 } from '../types/plm';
@@ -552,6 +553,7 @@ function slugify(name: string): string {
 
 function allowedChildTypesFor(parent: ResourceEntity): StructuralEntityType[] {
   if (isIntegratorContainer(parent) || isCompanyNode(parent)) return ['Element'];
+  if (canAttachIntegrators(parent)) return ['Element'];
   if (parent.type === 'Subsystem') return ['Component', 'Element'];
   if (parent.type === 'Component') return ['Element'];
   return ALLOWED_CHILD_TYPES[parent.type] || [];
@@ -566,6 +568,12 @@ function resolvedChildKind(
   if (isCompanyNode(parent)) return 'product';
   if (isIntegratorContainer(parent)) {
     return requested === 'product' ? 'product' : 'company';
+  }
+  if (canAttachIntegrators(parent)) {
+    if (requested === 'product') return 'product';
+    if (requested === 'integrator') return 'integrator';
+    if (requested === 'company') return 'company';
+    return requested;
   }
   return requested;
 }

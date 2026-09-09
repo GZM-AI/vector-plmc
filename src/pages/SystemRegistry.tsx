@@ -58,8 +58,10 @@ import {
 import type { Document, ReleaseStatus, RevisionRecord, ElementKind } from '../types/plm';
 import {
   ELEMENT_KIND_LABEL,
+  canAttachIntegrators,
   isCompanyNode,
   isIntegratorContainer,
+  isSourcingNode,
 } from '../types/plm';
 import {
   applyOverlay,
@@ -495,6 +497,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     isCompanyNode(entity) ? 'product' : isIntegratorContainer(entity) ? 'company' : 'hardware'
   );
   const [childDescription, setChildDescription] = useState('');
+  const [showAddIntegrator, setShowAddIntegrator] = useState(false);
+  const [integratorName, setIntegratorName] = useState('');
+  const [integratorProduct, setIntegratorProduct] = useState('');
+  const [integratorDescription, setIntegratorDescription] = useState('');
   const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
   const [draftType, setDraftType] = useState(entity.type);
   const [draftKind, setDraftKind] = useState<ElementKind>(
@@ -514,6 +520,19 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     entity.type === 'Component' ||
     isIntegratorContainer(entity) ||
     isCompanyNode(entity);
+  const canHaveIntegrators = canAttachIntegrators(entity);
+  const designChildren = sortChildren(
+    entity.id,
+    (entity.children || []).filter((c) => !isSourcingNode(applyOverlay(c)))
+  );
+  const integratorChildren = sortChildren(
+    entity.id,
+    (entity.children || []).filter((c) => isSourcingNode(applyOverlay(c)))
+  );
+  const containedList =
+    isIntegratorContainer(entity) || isCompanyNode(entity)
+      ? sortChildren(entity.id, entity.children || [])
+      : designChildren;
   const canEditType = entity.type === 'Component' || entity.type === 'Element';
   const addableTypes: AddableChildType[] =
     entity.type === 'System'
@@ -538,6 +557,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setShowAddChild(false);
     setChildName('');
     setChildDescription('');
+    setShowAddIntegrator(false);
+    setIntegratorName('');
+    setIntegratorProduct('');
+    setIntegratorDescription('');
     setChildType(
       entity.type === 'Component' || isIntegratorContainer(entity) || isCompanyNode(entity)
         ? 'Element'
@@ -632,6 +655,39 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         'Could not add that child. Under Vertical Integrators add a company; under a company add a product; under a subsystem use Component or Element.'
       );
     }
+  };
+
+  const handleAddIntegrator = () => {
+    const companyName = integratorName.trim();
+    if (!companyName) return;
+    const company = addChildEntity(entity.id, {
+      name: companyName,
+      type: 'Element',
+      description: integratorDescription,
+      kind: 'company',
+    });
+    if (!company) {
+      setSaveMsg('Could not add that integrator under this part.');
+      return;
+    }
+    const productName = integratorProduct.trim();
+    if (productName) {
+      addChildEntity(company.id, {
+        name: productName,
+        type: 'Element',
+        description: integratorDescription,
+        kind: 'product',
+      });
+    }
+    setShowAddIntegrator(false);
+    setIntegratorName('');
+    setIntegratorProduct('');
+    setIntegratorDescription('');
+    setSaveMsg(
+      productName
+        ? `Added integrator “${company.name}” / “${productName}” under ${entity.name}.`
+        : `Added integrator “${company.name}” under ${entity.name}.`
+    );
   };
 
   const handleRemove = (id: string, parentId?: string) => {
@@ -1257,15 +1313,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {(canAddChild || (entity.children && entity.children.length > 0)) && (
+      {(canAddChild || containedList.length > 0) && (
         <div>
           <div className="flex items-center justify-between gap-3 mb-3">
             <h4 className="text-sm font-medium text-blue-400">
               {isIntegratorContainer(entity)
-                ? `Candidate companies (${entity.children?.length || 0})`
+                ? `Candidate companies (${containedList.length})`
                 : isCompanyNode(entity)
-                  ? `Products (${entity.children?.length || 0})`
-                  : `Contained Elements (${entity.children?.length || 0})`}
+                  ? `Products (${containedList.length})`
+                  : `Contained Elements (${containedList.length})`}
             </h4>
             {canAddChild && (
               <button
@@ -1388,9 +1444,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             </div>
           )}
 
-          {entity.children && entity.children.length > 0 ? (
+          {containedList.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {entity.children.map((child) => {
+              {containedList.map((child) => {
                 const c = applyOverlay(child);
                 const childRemovable =
                   child.type === 'Component' ||
@@ -1460,6 +1516,170 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
               <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
                 No children yet. Use <span className="text-zinc-400">Add child</span> to grow this
                 branch during R&amp;D.
+              </p>
+            )
+          )}
+        </div>
+      )}
+
+      {canHaveIntegrators && (
+        <div>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h4 className="text-sm font-medium text-amber-400 flex items-center gap-2">
+              <Factory size={14} />
+              Vertical Integrators ({integratorChildren.length})
+            </h4>
+            <button
+              type="button"
+              onClick={() => setShowAddIntegrator((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-amber-600/20 border border-amber-700/50 text-amber-200 hover:bg-amber-600/30"
+            >
+              <Plus size={12} />
+              Add integrator
+            </button>
+          </div>
+          <p className="text-[11px] text-zinc-500 mb-3">
+            Candidate companies and products that could vertically integrate into{' '}
+            <span className="text-zinc-300">{entity.name}</span>. Not a costed part.
+          </p>
+
+          {showAddIntegrator && (
+            <div className="mb-4 bg-zinc-950 border border-amber-900/40 rounded-2xl p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] text-zinc-500 block mb-1">Company</label>
+                  <input
+                    value={integratorName}
+                    onChange={(e) => setIntegratorName(e.target.value)}
+                    placeholder="e.g. Anduril"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] text-zinc-500 block mb-1">
+                    Product (optional)
+                  </label>
+                  <input
+                    value={integratorProduct}
+                    onChange={(e) => setIntegratorProduct(e.target.value)}
+                    placeholder="e.g. Lattice SDK"
+                    className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="text-[11px] text-zinc-500 block mb-1">
+                  Notes (optional)
+                </label>
+                <textarea
+                  value={integratorDescription}
+                  onChange={(e) => setIntegratorDescription(e.target.value)}
+                  rows={2}
+                  placeholder="Why this company / product is a candidate…"
+                  className="w-full bg-zinc-900 border border-zinc-700 rounded-xl px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-y"
+                />
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={handleAddIntegrator}
+                  disabled={!integratorName.trim()}
+                  className={
+                    'px-4 py-2 rounded-xl text-sm font-medium ' +
+                    (integratorName.trim()
+                      ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                      : 'bg-zinc-800 text-zinc-500 cursor-not-allowed')
+                  }
+                >
+                  Add integrator
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddIntegrator(false)}
+                  className="px-4 py-2 rounded-xl bg-zinc-800 text-sm text-zinc-300"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {integratorChildren.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {integratorChildren.map((child) => {
+                const c = applyOverlay(child);
+                const products = (c.children || []).filter((p) =>
+                  isSourcingNode(applyOverlay(p))
+                );
+                return (
+                  <div
+                    key={child.id}
+                    className="bg-zinc-950 border border-amber-900/30 hover:border-amber-600 rounded-2xl p-4 transition group"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => onSelectRelated?.(child.id)}
+                      className="w-full text-left"
+                    >
+                      <div className="flex items-center gap-2 mb-1">
+                        {nodeTypeIcon(c, 16)}
+                        <span className="text-sm font-medium text-white group-hover:text-amber-200 truncate">
+                          {c.name}
+                        </span>
+                        <span className="text-[10px] text-zinc-600 ml-auto">
+                          Rev {c.revision}
+                        </span>
+                      </div>
+                      <p className="text-xs text-zinc-500 line-clamp-2">
+                        {c.description ||
+                          (products.length
+                            ? `${products.length} product${products.length === 1 ? '' : 's'}`
+                            : 'Integrator candidate')}
+                      </p>
+                      {products.length > 0 && (
+                        <p className="text-[11px] text-amber-200/70 mt-1 truncate">
+                          {products.map((p) => applyOverlay(p).name).join(' · ')}
+                        </p>
+                      )}
+                    </button>
+                    <div className="mt-2 flex items-center justify-end">
+                      {pendingRemoveId === child.id ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleRemove(child.id, entity.id)}
+                            className="text-[11px] px-2.5 py-1 rounded-lg bg-red-600 text-white"
+                          >
+                            Confirm
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setPendingRemoveId(null)}
+                            className="text-[11px] px-2.5 py-1 rounded-lg bg-zinc-800 text-zinc-300"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setPendingRemoveId(child.id)}
+                          className="inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-red-300"
+                        >
+                          <Trash2 size={11} />
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            !showAddIntegrator && (
+              <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-amber-900/20 rounded-2xl px-4 py-3">
+                No integrators on this part yet. Add a company (and optional product) as a
+                candidate.
               </p>
             )
           )}
@@ -1544,6 +1764,9 @@ const SubsystemOverviewCard: React.FC<{
           const nestedCompanies = isIntegratorContainer(c)
             ? sortChildren(c.id, c.children || [])
             : [];
+          const partIntegrators = !isIntegratorContainer(c)
+            ? (c.children || []).filter((x) => isSourcingNode(applyOverlay(x)))
+            : [];
           return (
             <div key={child.id} className="space-y-1">
               <div className="w-full flex items-center gap-1 px-1 py-1 rounded-xl bg-zinc-950/80 border border-zinc-800/80 hover:border-blue-600 transition group">
@@ -1598,6 +1821,11 @@ const SubsystemOverviewCard: React.FC<{
                   {nestedCompanies.length > 0 && (
                     <span className="text-[10px] text-amber-400/80 shrink-0">
                       {nestedCompanies.length} co.
+                    </span>
+                  )}
+                  {partIntegrators.length > 0 && (
+                    <span className="text-[10px] text-amber-400/80 shrink-0">
+                      {partIntegrators.length} VI
                     </span>
                   )}
                   {(() => {
