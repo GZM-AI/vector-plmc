@@ -1197,12 +1197,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           <textarea
             value={draftDescription}
             onChange={(e) => setDraftDescription(e.target.value)}
-            rows={5}
-            placeholder="Describe this subsystem, component, or software item…"
-            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed focus:outline-none focus:border-blue-500 resize-y min-h-[120px]"
+            rows={8}
+            placeholder="Describe this subsystem, component, or software item. Line breaks and paragraphs are kept."
+            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y min-h-[160px]"
           />
         ) : entity.description ? (
-          <p className="text-zinc-300 leading-relaxed text-[15px]">{entity.description}</p>
+          <div className="text-zinc-300 leading-relaxed text-[15px] whitespace-pre-wrap break-words">
+            {entity.description}
+          </div>
         ) : (
           <p className="text-xs text-zinc-600">No description yet. Click Edit details to add one.</p>
         )}
@@ -1214,14 +1216,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           <textarea
             value={draftNotes}
             onChange={(e) => setDraftNotes(e.target.value)}
-            rows={3}
-            placeholder="Working notes, open questions, links to decisions…"
-            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed focus:outline-none focus:border-blue-500 resize-y"
+            rows={6}
+            placeholder="Working notes, open questions, links to decisions. Line breaks and paragraphs are kept."
+            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y min-h-[120px]"
           />
         ) : (entity as ResourceEntity & { notes?: string }).notes ? (
-          <p className="text-zinc-400 leading-relaxed text-sm whitespace-pre-wrap">
+          <div className="text-zinc-400 leading-relaxed text-sm whitespace-pre-wrap break-words">
             {(entity as ResourceEntity & { notes?: string }).notes}
-          </p>
+          </div>
         ) : (
           <p className="text-xs text-zinc-600">No notes yet.</p>
         )}
