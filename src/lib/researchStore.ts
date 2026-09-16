@@ -2,8 +2,7 @@
  * Deep Research saved runs — cloud-first
  * Amplify ResearchRecord + localStorage cache vector-plm-research-v1
  *
- * Until ResearchRecord is in the deployed AppSync schema, saves stay on this
- * browser and retry to cloud on hydrate.
+ * Cloud is source of truth when ResearchRecord exists; localStorage is cache.
  */
 import { generateClient } from 'aws-amplify/data'
 import { getCurrentUser } from 'aws-amplify/auth'
@@ -245,7 +244,7 @@ export async function saveResearchRun(input: {
   emit()
   const ok = await upsertCloud(run)
   if (!ok) {
-    state.lastError = 'Saved on this device. Cloud model not deployed yet.'
+    state.lastError = 'Saved on this device. Cloud write failed — check ResearchRecord on Amplify.'
     emit()
   }
   return run

@@ -228,17 +228,18 @@ const DeepResearch: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-6 px-4 py-3 rounded-2xl bg-blue-950/30 border border-blue-900/40 text-blue-200 text-sm flex gap-3 items-start">
-        <AlertTriangle size={18} className="shrink-0 mt-0.5" />
-        <div>
-          Calls the <strong>same Lambda</strong> as PID Design Lab (
-          <code className="text-blue-100">bedrockChat</code> /{' '}
-          <code className="text-blue-100">grokChat</code>). Vendor API keys stay on the server.
-          Saved runs keep model, research type, and Registry context. Until{' '}
-          <code className="text-blue-100">ResearchRecord</code> is deployed on Amplify, the
-          library lives in this browser cache and uploads when the model exists.
+      {storeError ? (
+        <div className="mb-6 px-4 py-3 rounded-2xl bg-amber-950/30 border border-amber-900/40 text-amber-200 text-sm flex gap-3 items-start">
+          <AlertTriangle size={18} className="shrink-0 mt-0.5" />
+          <div>{storeError}</div>
         </div>
-      </div>
+      ) : (
+        <div className="mb-6 px-4 py-3 rounded-2xl bg-zinc-900 border border-zinc-800 text-zinc-400 text-sm">
+          Same Lambda as PID Design Lab (<code className="text-zinc-300">bedrockChat</code> /{' '}
+          <code className="text-zinc-300">grokChat</code>). Keys stay on the server. Saved runs
+          are team-shared on Amplify and keep model, research type, and Registry context.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-12 gap-6">
         <div className="xl:col-span-4 space-y-5">
