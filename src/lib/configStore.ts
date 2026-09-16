@@ -38,6 +38,7 @@ export type EntityOverlay = {
   name?: string;
   description?: string;
   notes?: string;
+  tags?: string[];
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
 };
@@ -177,6 +178,7 @@ async function pullFromCloud(): Promise<boolean> {
           name: row.name ?? undefined,
           description: row.description ?? undefined,
           notes: unpacked.notes ?? undefined,
+          tags: unpacked.tags,
           structuralType:
             unpacked.structuralType || localPrev?.structuralType || undefined,
           kind: unpacked.kind || localPrev?.kind || undefined,
@@ -199,6 +201,7 @@ async function pullFromCloud(): Promise<boolean> {
         createdAt: row.createdAt,
         children: [],
         kind: unpacked.kind,
+        tags: unpacked.tags,
         relatedIds: unpacked.supplierId ? [unpacked.supplierId] : undefined,
       };
     });
@@ -265,6 +268,7 @@ function packOverlayNotes(o: EntityOverlay): string | undefined {
   const meta: Record<string, string> = {};
   if (o.structuralType) meta.st = o.structuralType;
   if (o.kind) meta.k = o.kind;
+  if (o.tags !== undefined) meta.tg = o.tags.join(',');
   if (!Object.keys(meta).length) return o.notes;
   return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
 }
@@ -274,17 +278,19 @@ function unpackOverlayNotes(raw: string | undefined | null): {
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
   supplierId?: string;
+  tags?: string[];
 } {
   if (!raw) return {};
   const m = raw.match(PLM_META_RE);
   if (!m) return { notes: raw };
   try {
-    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string };
+    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string };
     return {
       notes: raw.slice(m[0].length) || undefined,
       structuralType: meta.st as StructuralEntityType | undefined,
       kind: meta.k as ElementKind | undefined,
       supplierId: meta.sid,
+      tags: meta.tg !== undefined ? (meta.tg ? meta.tg.split(',').map((t) => t.trim()).filter(Boolean) : []) : undefined,
     };
   } catch {
     return { notes: raw };
@@ -327,6 +333,7 @@ function packExtraDescription(entity: ResourceEntity): string | undefined {
   if (entity.kind) meta.k = entity.kind;
   if (entity.type) meta.st = entity.type;
   if (entity.relatedIds && entity.relatedIds[0]) meta.sid = entity.relatedIds[0];
+  if (entity.tags && entity.tags.length) meta.tg = entity.tags.join(',');
   if (!Object.keys(meta).length) return entity.description;
   return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
 }
@@ -494,6 +501,7 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
     type: o.structuralType ?? entity.type,
     kind: o.kind !== undefined ? o.kind : entity.kind,
     ...(o.notes !== undefined ? { notes: o.notes } : {}),
+    ...(o.tags !== undefined ? { tags: o.tags } : {}),
   } as ResourceEntity & { notes?: string };
 }
 
@@ -702,6 +710,7 @@ export function updateEntityFields(
     name?: string;
     description?: string;
     notes?: string;
+    tags?: string[];
     modifiedBy?: string;
     type?: StructuralEntityType;
     kind?: ElementKind;
@@ -726,6 +735,7 @@ export function updateEntityFields(
                 fields.description !== undefined ? fields.description : e.description,
               type: fields.type !== undefined ? fields.type : e.type,
               kind: fields.kind !== undefined ? fields.kind : e.kind,
+              tags: fields.tags !== undefined ? fields.tags : e.tags,
               lastModified: now,
               modifiedBy: by,
             }
@@ -744,12 +754,14 @@ export function updateEntityFields(
     name: fields.name !== undefined ? fields.name : prev?.name,
     description: fields.description !== undefined ? fields.description : prev?.description,
     notes: fields.notes !== undefined ? fields.notes : prev?.notes,
+    tags: fields.tags !== undefined ? fields.tags : prev?.tags,
     structuralType: fields.type !== undefined ? fields.type : prev?.structuralType,
     kind: fields.kind !== undefined ? fields.kind : prev?.kind,
   };
   if (fields.name !== undefined) nextOverlay.name = fields.name;
   if (fields.description !== undefined) nextOverlay.description = fields.description;
   if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
+  if (fields.tags !== undefined) nextOverlay.tags = fields.tags;
   if (fields.type !== undefined) nextOverlay.structuralType = fields.type;
   if (fields.kind !== undefined) nextOverlay.kind = fields.kind;
 

@@ -33,6 +33,7 @@ import {
   ChevronUp,
   Trash2,
   Download,
+  X,
 } from 'lucide-react';
 import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childOrderStore';
 import {
@@ -92,6 +93,24 @@ const TYPE_ICON: Record<string, React.ReactNode> = {
   Interface: <GitBranch size={16} className="text-sky-400" />,
   Capability: <Zap size={16} className="text-amber-400" />,
 };
+
+function normalizeTags(list: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of list) {
+    const t = raw.trim();
+    if (!t) continue;
+    const key = t.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(t);
+  }
+  return out;
+}
+
+function parseTagInput(raw: string): string[] {
+  return normalizeTags(raw.split(/[,;\n]+/));
+}
 
 const KIND_ORDER: ElementKind[] = [
   'hardware',
@@ -624,6 +643,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [draftNotes, setDraftNotes] = useState(
     (entity as ResourceEntity & { notes?: string }).notes || ''
   );
+  const [draftTags, setDraftTags] = useState<string[]>(entity.tags || []);
+  const [tagDraft, setTagDraft] = useState('');
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [showAddChild, setShowAddChild] = useState(false);
   const [childName, setChildName] = useState('');
@@ -692,6 +713,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftTags(entity.tags || []);
+    setTagDraft('');
     setDraftType(entity.type);
     setDraftKind(((entity as ResourceEntity).kind as ElementKind) || 'hardware');
     setEditing(false);
@@ -735,6 +758,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftTags(entity.tags || []);
+    setTagDraft('');
     setDraftType(entity.type);
     setDraftKind(((entity as ResourceEntity).kind as ElementKind) || 'hardware');
     setEditing(true);
@@ -745,6 +770,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftTags(entity.tags || []);
+    setTagDraft('');
     setEditing(false);
     setSaveMsg(null);
   };
@@ -757,6 +784,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       name: draftName.trim() || entity.name,
       description: draftDescription,
       notes: draftNotes,
+      tags: normalizeTags([...draftTags, ...parseTagInput(tagDraft)]),
       ...(canEditType
         ? {
             type: nextType,
@@ -766,6 +794,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     });
     if (updated) {
       setEditing(false);
+      setDraftTags(updated.tags || []);
+      setTagDraft('');
       setDraftType(updated.type);
       setDraftKind(((updated as ResourceEntity).kind as ElementKind) || 'hardware');
       setSaveMsg(
@@ -1229,9 +1259,66 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {entity.tags && entity.tags.length > 0 && (
-        <div>
-          <h4 className="text-sm font-medium text-blue-400 mb-2">Tags</h4>
+      <div>
+        <h4 className="text-sm font-medium text-blue-400 mb-2">Tags</h4>
+        {editing ? (
+          <div className="space-y-2">
+            <div className="flex flex-wrap gap-2">
+              {draftTags.length === 0 && (
+                <span className="text-xs text-zinc-600">No tags yet.</span>
+              )}
+              {draftTags.map((tag) => (
+                <span
+                  key={tag}
+                  className="inline-flex items-center gap-1 text-xs px-3 py-1 rounded-full bg-zinc-950 border border-zinc-600 text-zinc-300"
+                >
+                  {tag}
+                  <button
+                    type="button"
+                    onClick={() => setDraftTags(draftTags.filter((t) => t !== tag))}
+                    className="text-zinc-500 hover:text-red-300"
+                    title={`Remove ${tag}`}
+                  >
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={tagDraft}
+                onChange={(e) => setTagDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ',') {
+                    e.preventDefault();
+                    const next = parseTagInput(tagDraft);
+                    if (next.length) {
+                      setDraftTags(normalizeTags([...draftTags, ...next]));
+                      setTagDraft('');
+                    }
+                  }
+                }}
+                placeholder="Add tag — Enter or comma"
+                className="flex-1 bg-zinc-950 border border-zinc-600 rounded-xl px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  const next = parseTagInput(tagDraft);
+                  if (!next.length) return;
+                  setDraftTags(normalizeTags([...draftTags, ...next]));
+                  setTagDraft('');
+                }}
+                className="px-3 py-2 rounded-xl text-sm bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+              >
+                Add
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-600">
+              Used by Registry search. Saved with the card — team-shared via overlay.
+            </p>
+          </div>
+        ) : entity.tags && entity.tags.length > 0 ? (
           <div className="flex flex-wrap gap-2">
             {entity.tags.map((tag) => (
               <span
@@ -1242,8 +1329,10 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
               </span>
             ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-zinc-600">No tags yet. Click Edit details to add some.</p>
+        )}
+      </div>
 
       {/* Phase 1 — Revision history */}
       <div>
