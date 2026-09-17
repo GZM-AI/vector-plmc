@@ -181,13 +181,24 @@ async function currentUserLabel(): Promise<string> {
   }
 }
 
+function isDocsAuthError(msg: string): boolean {
+  return /not authorized to access listDocuments/i.test(msg)
+}
+
 export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
   try {
-    const mode = (await signedIn()) ? 'userPool' : 'apiKey'
-    const client = dataClient(mode)
+    const authed = await signedIn()
+    if (!authed) {
+      state.hydrated = true
+      if (state.lastError && isDocsAuthError(state.lastError)) state.lastError = null
+      emit()
+      return
+    }
+    const client = dataClient('userPool')
     const { data, errors } = await client.models.Document.list({ limit: 1000 })
     if (errors?.length) {
-      state.lastError = errors[0].message || 'Document list failed'
+      const msg = errors[0].message || 'Document list failed'
+      state.lastError = isDocsAuthError(msg) ? null : msg
       emit()
       return
     }
@@ -205,7 +216,7 @@ export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
     console.log('[documentsStore] hydrated', docs.length)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    state.lastError = msg
+    state.lastError = isDocsAuthError(msg) ? null : msg
     console.warn('[documentsStore] hydrate failed — using local cache', err)
     emit()
   }

@@ -1516,7 +1516,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             }}
           />
         </div>
-        {(attachErr || getDocumentsError()) && (
+        {(attachErr ||
+          (getDocumentsError() &&
+            !/not authorized to access listDocuments/i.test(getDocumentsError() || ''))) && (
           <p className="text-xs text-red-400 mb-2">
             {attachErr || getDocumentsError()}
           </p>
