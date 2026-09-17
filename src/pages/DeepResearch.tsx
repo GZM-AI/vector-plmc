@@ -19,7 +19,11 @@ import {
 } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES, ResourceEntity } from '../data/tarSeedData';
 import { getRegistryTree } from '../lib/configStore';
-import { attachDocumentToEntity, hydrateDocumentsStoreFromCloud } from '../lib/documentsStore';
+import {
+  attachDocumentToEntity,
+  hydrateDocumentsStoreFromCloud,
+  getDocumentsError,
+} from '../lib/documentsStore';
 import {
   ResearchProvider,
   modelsForProvider,
@@ -183,15 +187,13 @@ const DeepResearch: React.FC = () => {
       });
       await hydrateDocumentsStoreFromCloud();
       setAttachOk(true);
-      setAttachMsg(`Attached to ${sub.name}.`);
-    } catch (e: any) {
-      const raw = e?.message || String(e);
-      setAttachOk(false);
+      const note = getDocumentsError();
       setAttachMsg(
-        /not authenticated|unauth|sign in|No current user|UserUnAuthenticated/i.test(raw)
-          ? 'Sign in first — attachments go to the team cloud, not this device.'
-          : raw
+        note ? `Attached to ${sub.name}. ${note}` : `Attached to ${sub.name}.`
       );
+    } catch (e: any) {
+      setAttachOk(false);
+      setAttachMsg(e?.message || String(e));
     } finally {
       setAttachingId(null);
     }

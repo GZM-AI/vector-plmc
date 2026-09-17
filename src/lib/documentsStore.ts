@@ -15,7 +15,9 @@ import type { Schema } from '../../amplify/data/resource'
 import type { Document, DocumentKind, ReleaseStatus } from '../types/plm'
 
 const CACHE_KEY = 'vector-plm-documents-v1'
+const BYTES_KEY = 'vector-plm-doc-bytes-v1'
 const MAX_BYTES = 80 * 1024 * 1024
+const MAX_INLINE = 4 * 1024 * 1024
 
 type StoreState = {
   documents: Document[]
@@ -71,8 +73,51 @@ export function getDocumentsError(): string | null {
   return state.lastError
 }
 
-function dataClient() {
-  return generateClient<Schema>({ authMode: 'userPool' })
+async function signedIn(): Promise<boolean> {
+  try {
+    await getCurrentUser()
+    return true
+  } catch {
+    return false
+  }
+}
+
+function dataClient(mode: 'userPool' | 'apiKey' = 'apiKey') {
+  return generateClient<Schema>({ authMode: mode })
+}
+
+function loadBytesMap(): Record<string, string> {
+  try {
+    const raw = localStorage.getItem(BYTES_KEY)
+    return raw ? (JSON.parse(raw) as Record<string, string>) : {}
+  } catch {
+    return {}
+  }
+}
+
+function saveLocalBytes(id: string, file: File): Promise<void> {
+  if (file.size > MAX_INLINE) return Promise.resolve()
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => {
+      try {
+        const map = loadBytesMap()
+        map[id] = String(reader.result || '')
+        localStorage.setItem(BYTES_KEY, JSON.stringify(map))
+        resolve()
+      } catch (e) {
+        reject(e)
+      }
+    }
+    reader.onerror = () => reject(reader.error)
+    reader.readAsDataURL(file)
+  })
+}
+
+function localBytesUrl(id: string): string | null {
+  const dataUrl = loadBytesMap()[id]
+  if (!dataUrl) return null
+  return dataUrl
 }
 
 function parseLinked(raw: unknown): string[] {
@@ -138,7 +183,8 @@ async function currentUserLabel(): Promise<string> {
 
 export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
   try {
-    const client = dataClient()
+    const mode = (await signedIn()) ? 'userPool' : 'apiKey'
+    const client = dataClient(mode)
     const { data, errors } = await client.models.Document.list({ limit: 1000 })
     if (errors?.length) {
       state.lastError = errors[0].message || 'Document list failed'
@@ -148,7 +194,11 @@ export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
     const docs = (data || [])
       .map((row) => fromRow(row as unknown as Record<string, unknown>))
       .filter((d): d is Document => !!d)
-    state.documents = docs
+    const byId = new Map(docs.map((d) => [d.id, d]))
+    for (const local of state.documents) {
+      if (!byId.has(local.id)) byId.set(local.id, local)
+    }
+    state.documents = [...byId.values()]
     state.hydrated = true
     state.lastError = null
     emit()
@@ -173,17 +223,45 @@ export async function attachDocumentToEntity(
 
   const id = `doc-${crypto.randomUUID()}`
   const fileName = safeFileName(file.name)
-  const storageKey = `documents/${id}/${fileName}`
+  let storageKey = `documents/${id}/${fileName}`
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
   const kind = opts?.kind || inferKind(file)
   const name = (opts?.name || file.name.replace(/\.[^.]+$/, '') || file.name).trim()
+  const contentType = file.type || 'application/octet-stream'
+  const authed = await signedIn()
+  let cloudFile = false
 
-  await uploadData({
-    path: storageKey,
-    data: file,
-    options: { contentType: file.type || 'application/octet-stream' },
-  }).result
+  if (authed) {
+    try {
+      await uploadData({
+        path: storageKey,
+        data: file,
+        options: { contentType },
+      }).result
+      cloudFile = true
+    } catch (pathErr) {
+      try {
+        await (uploadData as (input: Record<string, unknown>) => { result: Promise<unknown> })({
+          key: storageKey,
+          data: file,
+          options: { contentType },
+        }).result
+        cloudFile = true
+      } catch {
+        console.warn('[documentsStore] storage upload failed', pathErr)
+      }
+    }
+  }
+
+  if (!cloudFile) {
+    storageKey = `local:${id}`
+    try {
+      await saveLocalBytes(id, file)
+    } catch (e) {
+      console.warn('[documentsStore] local byte cache failed', e)
+    }
+  }
 
   const record: Document = {
     id,
@@ -204,8 +282,7 @@ export async function attachDocumentToEntity(
     modifiedBy,
   }
 
-  const client = dataClient()
-  const { errors } = await client.models.Document.create({
+  const payload = {
     id: record.id,
     name: record.name,
     kind: record.kind,
@@ -221,29 +298,58 @@ export async function attachDocumentToEntity(
     createdAt: now,
     lastModified: now,
     modifiedBy,
-  })
-  if (errors?.length) {
+  }
+
+  const modes: Array<'userPool' | 'apiKey'> = authed ? ['userPool', 'apiKey'] : ['apiKey']
+  let savedCloud = false
+  let lastMetaErr = ''
+  for (const mode of modes) {
     try {
-      await removeStorage({ path: storageKey })
-    } catch {
-      /* best effort */
+      const client = dataClient(mode)
+      const { errors } = await client.models.Document.create(payload)
+      if (!errors?.length) {
+        savedCloud = true
+        break
+      }
+      lastMetaErr = errors[0].message || `${mode} create failed`
+    } catch (err) {
+      lastMetaErr = err instanceof Error ? err.message : String(err)
     }
-    throw new Error(errors[0].message || 'Document metadata save failed')
   }
 
   state.documents = [record, ...state.documents.filter((d) => d.id !== id)]
-  state.lastError = null
+  state.lastError = savedCloud
+    ? null
+    : lastMetaErr
+      ? `Saved on this browser. Cloud: ${lastMetaErr}`
+      : authed
+        ? null
+        : 'Saved on this browser. Sign in to push attachments to team Storage.'
   emit()
   return record
 }
 
 export async function getDocumentDownloadUrl(doc: Document): Promise<string> {
   if (!doc.storageKey) throw new Error('This document has no file in storage.')
-  const { url } = await getUrl({
-    path: doc.storageKey,
-    options: { expiresIn: 300 },
-  })
-  return url.toString()
+  if (doc.storageKey.startsWith('local:')) {
+    const id = doc.storageKey.slice('local:'.length) || doc.id
+    const dataUrl = localBytesUrl(id) || localBytesUrl(doc.id)
+    if (!dataUrl) throw new Error('File is only on the machine that attached it.')
+    return dataUrl
+  }
+  try {
+    const { url } = await getUrl({
+      path: doc.storageKey,
+      options: { expiresIn: 300 },
+    })
+    return url.toString()
+  } catch {
+    const { url } = await getUrl({
+      path: doc.storageKey,
+      options: { expiresIn: 300 },
+    } as never)
+    return url.toString()
+  }
 }
 
 export async function unlinkDocumentFromEntity(documentId: string, entityId: string): Promise<void> {
@@ -252,7 +358,8 @@ export async function unlinkDocumentFromEntity(documentId: string, entityId: str
   const linked = existing.linkedEntityIds.filter((id) => id !== entityId)
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
-  const client = dataClient()
+  const mode = (await signedIn()) ? 'userPool' : 'apiKey'
+  const client = dataClient(mode)
   const { errors } = await client.models.Document.update({
     id: documentId,
     linkedEntityIdsJson: JSON.stringify(linked),
