@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES, ResourceEntity } from '../data/tarSeedData';
 import { getRegistryTree } from '../lib/configStore';
-import { attachDocumentToEntity } from '../lib/documentsStore';
+import { attachDocumentToEntity, hydrateDocumentsStoreFromCloud } from '../lib/documentsStore';
 import {
   ResearchProvider,
   modelsForProvider,
@@ -92,9 +92,10 @@ const DeepResearch: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [runsTick, setRunsTick] = useState(0);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
-  const [attachTarget, setAttachTarget] = useState<Record<string, string>>({});
+  const [attachSubsystemId, setAttachSubsystemId] = useState('');
   const [attachingId, setAttachingId] = useState<string | null>(null);
   const [attachMsg, setAttachMsg] = useState<string | null>(null);
+  const [attachOk, setAttachOk] = useState(false);
 
   const providerModels = useMemo(() => modelsForProvider(provider), [provider]);
   const runs = useMemo(() => getResearchRuns(), [runsTick]);
@@ -161,26 +162,33 @@ const DeepResearch: React.FC = () => {
     });
 
   const handleAttachWord = async (run: ResearchRun, key: string) => {
-    const targetId = attachTarget[key] || defaultSubsystemId(run.entityId) || entityId;
+    const targetId =
+      attachSubsystemId || defaultSubsystemId(run.entityId) || defaultSubsystemId(entityId);
     const sub = subsystems.find((s) => s.id === targetId);
     if (!sub) {
-      setAttachMsg('Pick a subsystem first.');
+      setAttachOk(false);
+      setAttachMsg('Pick a subsystem in the dropdown, then click Attach Word.');
       return;
     }
+    setAttachSubsystemId(sub.id);
     setAttachingId(key);
     setAttachMsg(null);
     try {
       const file = buildRunDocxFile(run);
+      if (!file.size) throw new Error('Word file was empty — export failed before upload.');
       await attachDocumentToEntity(sub.id, file, {
         name: run.title || file.name.replace(/\.docx$/i, ''),
         kind: 'analysis',
         description: `Deep Research · ${run.kind} · ${run.modelLabel}`,
       });
-      setAttachMsg(`Word attached to ${sub.name}. Open System Registry to see it.`);
+      await hydrateDocumentsStoreFromCloud();
+      setAttachOk(true);
+      setAttachMsg(`Attached to ${sub.name}.`);
     } catch (e: any) {
       const raw = e?.message || String(e);
+      setAttachOk(false);
       setAttachMsg(
-        /not authenticated|unauth|sign in|No current user/i.test(raw)
+        /not authenticated|unauth|sign in|No current user|UserUnAuthenticated/i.test(raw)
           ? 'Sign in first — attachments go to the team cloud, not this device.'
           : raw
       );
@@ -262,6 +270,8 @@ const DeepResearch: React.FC = () => {
       setKind(run.kindId);
     }
     setEntityId(run.entityId || '');
+    const inferred = defaultSubsystemId(run.entityId);
+    if (inferred && !attachSubsystemId) setAttachSubsystemId(inferred);
     setError(null);
     setSaveMsg(`Opened “${run.title}”`);
   };
@@ -418,8 +428,25 @@ const DeepResearch: React.FC = () => {
               </button>
             )}
             {attachMsg && (
-              <p className="text-[11px] text-emerald-300/90 bg-emerald-950/20 border border-emerald-900/40 rounded-xl px-2.5 py-1.5">
+              <p
+                className={`text-[11px] rounded-xl px-2.5 py-1.5 border ${
+                  attachOk
+                    ? 'text-emerald-300 bg-emerald-950/20 border-emerald-900/40'
+                    : 'text-red-300 bg-red-950/30 border-red-900/50'
+                }`}
+              >
                 {attachMsg}
+                {attachOk && attachSubsystemId && (
+                  <>
+                    {' '}
+                    <Link
+                      to={`/system-registry?id=${encodeURIComponent(attachSubsystemId)}`}
+                      className="underline text-sky-300"
+                    >
+                      Open {subsystems.find((s) => s.id === attachSubsystemId)?.name || 'card'}
+                    </Link>
+                  </>
+                )}
               </p>
             )}
             {runs.length === 0 && (
@@ -497,13 +524,11 @@ const DeepResearch: React.FC = () => {
                     <div className="flex gap-1.5">
                       <select
                         value={
-                          attachTarget[run.id] ||
+                          attachSubsystemId ||
                           defaultSubsystemId(run.entityId) ||
                           ''
                         }
-                        onChange={(e) =>
-                          setAttachTarget((prev) => ({ ...prev, [run.id]: e.target.value }))
-                        }
+                        onChange={(e) => setAttachSubsystemId(e.target.value)}
                         className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-blue-500"
                       >
                         <option value="">Select subsystem…</option>
@@ -645,13 +670,11 @@ const DeepResearch: React.FC = () => {
                   </button>
                   <select
                     value={
-                      attachTarget.current ||
+                      attachSubsystemId ||
                       defaultSubsystemId(selectedEntity?.id) ||
                       ''
                     }
-                    onChange={(e) =>
-                      setAttachTarget((prev) => ({ ...prev, current: e.target.value }))
-                    }
+                    onChange={(e) => setAttachSubsystemId(e.target.value)}
                     className="bg-zinc-950 border border-zinc-700 rounded-xl px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
                   >
                     <option value="">Attach Word to…</option>
