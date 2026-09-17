@@ -340,6 +340,113 @@ function dataUrlToBlobUrl(dataUrl: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: mime }))
 }
 
+export type DocumentPreview = {
+  title: string
+  fileName?: string
+  kind: 'text' | 'image' | 'pdf' | 'file'
+  text?: string
+  objectUrl?: string
+}
+
+function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+}
+
+function zipStoreRead(buf: Uint8Array, wantPath: string): string | null {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength)
+  const dec = new TextDecoder('utf-8')
+  let offset = 0
+  while (offset + 30 <= buf.length) {
+    if (view.getUint32(offset, true) !== 0x04034b50) break
+    const method = view.getUint16(offset + 8, true)
+    const comp = view.getUint32(offset + 18, true)
+    const nameLen = view.getUint16(offset + 26, true)
+    const extraLen = view.getUint16(offset + 28, true)
+    const name = dec.decode(buf.subarray(offset + 30, offset + 30 + nameLen))
+    const dataStart = offset + 30 + nameLen + extraLen
+    const data = buf.subarray(dataStart, dataStart + comp)
+    if (name === wantPath) {
+      if (method !== 0) return null
+      return dec.decode(data)
+    }
+    offset = dataStart + comp
+  }
+  return null
+}
+
+function docxXmlToText(xml: string): string {
+  const withBreaks = xml
+    .replace(/<w:tab\/>/g, '\t')
+    .replace(/<w:br\b[^>]*\/>/g, '\n')
+    .replace(/<\/w:p>/g, '\n')
+  const texts = [...withBreaks.matchAll(/<w:t\b[^>]*>([^<]*)<\/w:t>/g)].map((m) =>
+    decodeXmlEntities(m[1])
+  )
+  return texts.join('').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+async function urlToBytes(url: string): Promise<Uint8Array> {
+  if (url.startsWith('data:')) {
+    const comma = url.indexOf(',')
+    const payload = comma >= 0 ? url.slice(comma + 1) : url
+    const binary = atob(payload)
+    const bytes = new Uint8Array(binary.length)
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+    return bytes
+  }
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`Could not load file (${res.status})`)
+  return new Uint8Array(await res.arrayBuffer())
+}
+
+export async function previewAttachedDocument(doc: Document): Promise<DocumentPreview> {
+  const url = await getDocumentDownloadUrl(doc)
+  const name = (doc.fileName || doc.name || '').toLowerCase()
+  const mime = (doc.mimeType || '').toLowerCase()
+  const title = doc.name || doc.fileName || 'Attachment'
+
+  if (mime.startsWith('image/') || /\.(png|jpe?g|gif|webp|bmp|tif|tiff)$/.test(name)) {
+    const objectUrl = url.startsWith('data:') ? dataUrlToBlobUrl(url) : url
+    return { title, fileName: doc.fileName, kind: 'image', objectUrl }
+  }
+  if (mime.includes('pdf') || name.endsWith('.pdf')) {
+    const objectUrl = url.startsWith('data:') ? dataUrlToBlobUrl(url) : url
+    return { title, fileName: doc.fileName, kind: 'pdf', objectUrl }
+  }
+  if (
+    mime.includes('word') ||
+    mime.includes('officedocument') ||
+    name.endsWith('.docx')
+  ) {
+    const bytes = await urlToBytes(url)
+    const xml = zipStoreRead(bytes, 'word/document.xml')
+    if (xml) {
+      return { title, fileName: doc.fileName, kind: 'text', text: docxXmlToText(xml) }
+    }
+    return {
+      title,
+      fileName: doc.fileName,
+      kind: 'file',
+      text: 'This Word file cannot be previewed here. Use Download.',
+    }
+  }
+  if (mime.startsWith('text/') || /\.(md|txt|csv|json)$/.test(name)) {
+    const bytes = await urlToBytes(url)
+    return { title, fileName: doc.fileName, kind: 'text', text: new TextDecoder().decode(bytes) }
+  }
+  return {
+    title,
+    fileName: doc.fileName,
+    kind: 'file',
+    text: 'No in-app preview for this file type. Use Download.',
+  }
+}
+
 export async function openAttachedDocument(doc: Document): Promise<void> {
   const url = await getDocumentDownloadUrl(doc)
   const name = doc.fileName || `${doc.name || 'attachment'}.docx`

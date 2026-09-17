@@ -55,6 +55,7 @@ import {
   subscribeDocumentsStore,
   attachDocumentToEntity,
   openAttachedDocument,
+  previewAttachedDocument,
   unlinkDocumentFromEntity,
   hydrateDocumentsStoreFromCloud,
   getDocumentsError,
@@ -606,7 +607,31 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [docsTick, setDocsTick] = useState(0);
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachErr, setAttachErr] = useState<string | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
+  const [previewBody, setPreviewBody] = useState<{
+    title: string;
+    fileName?: string;
+    kind: 'text' | 'image' | 'pdf' | 'file';
+    text?: string;
+    objectUrl?: string;
+  } | null>(null);
+  const [previewBusy, setPreviewBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const openDocInVector = async (d: Document) => {
+    setAttachErr(null);
+    setPreviewDoc(d);
+    setPreviewBody(null);
+    setPreviewBusy(true);
+    try {
+      setPreviewBody(await previewAttachedDocument(d));
+    } catch (err) {
+      setAttachErr(err instanceof Error ? err.message : String(err));
+      setPreviewDoc(null);
+    } finally {
+      setPreviewBusy(false);
+    }
+  };
 
   const linkedDocs: Document[] = useMemo(
     () => documentsForEntity(entity.id),
@@ -1515,7 +1540,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 <FileText size={16} className="text-sky-400 shrink-0 mt-0.5" />
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm text-white font-medium truncate">{d.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => void openDocInVector(d)}
+                      className="text-sm text-white font-medium truncate hover:text-sky-300 text-left"
+                      title="Open in Vector"
+                    >
+                      {d.name}
+                    </button>
                     <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-900 border border-zinc-700 text-zinc-400">
                       {DOC_KIND_LABEL[d.kind] ?? d.kind}
                     </span>
@@ -1541,7 +1573,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     type="button"
-                    title="Open / download"
+                    title="Open in Vector"
+                    onClick={() => void openDocInVector(d)}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-300 hover:bg-zinc-900"
+                  >
+                    <Eye size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    title="Download"
                     onClick={async () => {
                       try {
                         await openAttachedDocument(d);
@@ -1573,6 +1613,76 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </ul>
         )}
       </div>
+
+      {(previewDoc || previewBusy) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-3xl max-h-[85vh] bg-zinc-950 border border-zinc-700 rounded-3xl shadow-2xl flex flex-col">
+            <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-zinc-800">
+              <div className="min-w-0">
+                <h4 className="text-base font-medium text-white truncate">
+                  {previewBody?.title || previewDoc?.name || 'Attachment'}
+                </h4>
+                <p className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                  {previewBody?.fileName || previewDoc?.fileName || 'Opens inside Vector'}
+                </p>
+              </div>
+              <div className="flex items-center gap-1 shrink-0">
+                {previewDoc && (
+                  <button
+                    type="button"
+                    title="Download"
+                    onClick={() => previewDoc && void openAttachedDocument(previewDoc)}
+                    className="p-1.5 rounded-lg text-zinc-400 hover:text-sky-300"
+                  >
+                    <Download size={16} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  title="Close"
+                  onClick={() => {
+                    if (previewBody?.objectUrl?.startsWith('blob:')) {
+                      URL.revokeObjectURL(previewBody.objectUrl);
+                    }
+                    setPreviewDoc(null);
+                    setPreviewBody(null);
+                  }}
+                  className="p-1.5 rounded-lg text-zinc-400 hover:text-white"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 overflow-auto p-5">
+              {previewBusy && (
+                <p className="text-sm text-zinc-400 animate-pulse">Opening…</p>
+              )}
+              {!previewBusy && previewBody?.kind === 'text' && (
+                <pre className="text-sm text-zinc-200 whitespace-pre-wrap font-sans leading-relaxed">
+                  {previewBody.text || 'Empty document.'}
+                </pre>
+              )}
+              {!previewBusy && previewBody?.kind === 'image' && previewBody.objectUrl && (
+                <img
+                  src={previewBody.objectUrl}
+                  alt={previewBody.title}
+                  className="max-w-full rounded-xl border border-zinc-800"
+                />
+              )}
+              {!previewBusy && previewBody?.kind === 'pdf' && previewBody.objectUrl && (
+                <iframe
+                  title={previewBody.title}
+                  src={previewBody.objectUrl}
+                  className="w-full h-[60vh] rounded-xl border border-zinc-800 bg-zinc-900"
+                />
+              )}
+              {!previewBusy && previewBody?.kind === 'file' && (
+                <p className="text-sm text-zinc-400">{previewBody.text}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {(canAddChild || containedList.length > 0) && (
         <div>
