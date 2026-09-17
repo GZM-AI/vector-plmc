@@ -13,6 +13,8 @@ import {
   AlertTriangle,
   Bookmark,
   Trash2,
+  FileDown,
+  FileText,
 } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES, ResourceEntity } from '../data/tarSeedData';
 import {
@@ -30,6 +32,13 @@ import {
   hydrateResearchStoreFromCloud,
   type ResearchRun,
 } from '../lib/researchStore';
+import {
+  exportRunMarkdown,
+  exportRunDocx,
+  exportRunPdf,
+  exportRunsMarkdown,
+  runFromCurrent,
+} from '../lib/researchExport';
 
 type ResearchKind = 'company' | 'product' | 'cost' | 'manufacturing' | 'open';
 
@@ -337,6 +346,15 @@ const DeepResearch: React.FC = () => {
                 {runs.length}
               </span>
             </h3>
+            {runs.length > 1 && (
+              <button
+                type="button"
+                onClick={() => exportRunsMarkdown(runs)}
+                className="text-[11px] text-zinc-500 hover:text-zinc-200 inline-flex items-center gap-1"
+              >
+                <FileDown size={11} /> Export all as Markdown
+              </button>
+            )}
             {runs.length === 0 && (
               <p className="text-xs text-zinc-600">
                 After a run, use Save this run. Each card stores model, type, and Registry
@@ -371,19 +389,42 @@ const DeepResearch: React.FC = () => {
                       {run.createdBy ? ` · ${run.createdBy}` : ''}
                     </div>
                   </button>
-                  <button
-                    type="button"
-                    title="Delete saved run"
-                    onClick={() => {
-                      if (window.confirm(`Delete “${run.title}”?`)) {
-                        void deleteResearchRun(run.id);
-                        if (openRunId === run.id) setOpenRunId(null);
-                      }
-                    }}
-                    className="mt-2 text-[11px] text-zinc-600 hover:text-red-300 inline-flex items-center gap-1"
-                  >
-                    <Trash2 size={11} /> Remove
-                  </button>
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <button
+                      type="button"
+                      onClick={() => exportRunMarkdown(run)}
+                      className="text-[11px] text-zinc-500 hover:text-zinc-200 inline-flex items-center gap-1"
+                    >
+                      <FileDown size={11} /> MD
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportRunDocx(run)}
+                      className="text-[11px] text-zinc-500 hover:text-zinc-200 inline-flex items-center gap-1"
+                    >
+                      <FileText size={11} /> Word
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => exportRunPdf(run)}
+                      className="text-[11px] text-zinc-500 hover:text-zinc-200 inline-flex items-center gap-1"
+                    >
+                      <FileDown size={11} /> PDF
+                    </button>
+                    <button
+                      type="button"
+                      title="Delete saved run"
+                      onClick={() => {
+                        if (window.confirm(`Delete “${run.title}”?`)) {
+                          void deleteResearchRun(run.id);
+                          if (openRunId === run.id) setOpenRunId(null);
+                        }
+                      }}
+                      className="ml-auto text-[11px] text-zinc-600 hover:text-red-300 inline-flex items-center gap-1"
+                    >
+                      <Trash2 size={11} /> Remove
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -436,6 +477,72 @@ const DeepResearch: React.FC = () => {
                   >
                     <Bookmark size={12} />
                     {saving ? 'Saving…' : 'Save this run'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportRunMarkdown(
+                        runFromCurrent({
+                          title: saveTitle,
+                          query,
+                          resultText: result,
+                          kind: KIND_META[kind].label,
+                          kindId: kind,
+                          provider,
+                          modelId,
+                          modelLabel: activeModelLabel,
+                          entityName: selectedEntity?.name,
+                          entityType: selectedEntity?.type,
+                        })
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-xl text-xs bg-zinc-950 border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  >
+                    MD
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportRunDocx(
+                        runFromCurrent({
+                          title: saveTitle,
+                          query,
+                          resultText: result,
+                          kind: KIND_META[kind].label,
+                          kindId: kind,
+                          provider,
+                          modelId,
+                          modelLabel: activeModelLabel,
+                          entityName: selectedEntity?.name,
+                          entityType: selectedEntity?.type,
+                        })
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-xl text-xs bg-zinc-950 border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  >
+                    Word
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      exportRunPdf(
+                        runFromCurrent({
+                          title: saveTitle,
+                          query,
+                          resultText: result,
+                          kind: KIND_META[kind].label,
+                          kindId: kind,
+                          provider,
+                          modelId,
+                          modelLabel: activeModelLabel,
+                          entityName: selectedEntity?.name,
+                          entityType: selectedEntity?.type,
+                        })
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-xl text-xs bg-zinc-950 border border-zinc-700 text-zinc-300 hover:border-zinc-500"
+                  >
+                    PDF
                   </button>
                 </div>
               )}
