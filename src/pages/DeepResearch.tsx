@@ -15,8 +15,11 @@ import {
   Trash2,
   FileDown,
   FileText,
+  Paperclip,
 } from 'lucide-react';
 import { TAR_TREE, ALL_ENTITIES, ResourceEntity } from '../data/tarSeedData';
+import { getRegistryTree } from '../lib/configStore';
+import { attachDocumentToEntity } from '../lib/documentsStore';
 import {
   ResearchProvider,
   modelsForProvider,
@@ -38,6 +41,7 @@ import {
   exportRunPdf,
   exportRunsMarkdown,
   runFromCurrent,
+  buildRunDocxFile,
 } from '../lib/researchExport';
 
 type ResearchKind = 'company' | 'product' | 'cost' | 'manufacturing' | 'open';
@@ -88,6 +92,9 @@ const DeepResearch: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [runsTick, setRunsTick] = useState(0);
   const [openRunId, setOpenRunId] = useState<string | null>(null);
+  const [attachTarget, setAttachTarget] = useState<Record<string, string>>({});
+  const [attachingId, setAttachingId] = useState<string | null>(null);
+  const [attachMsg, setAttachMsg] = useState<string | null>(null);
 
   const providerModels = useMemo(() => modelsForProvider(provider), [provider]);
   const runs = useMemo(() => getResearchRuns(), [runsTick]);
@@ -105,8 +112,9 @@ const DeepResearch: React.FC = () => {
   }, [provider]);
 
   const subsystems = useMemo(
-    () => (TAR_TREE.children || []).filter((c) => c.type === 'Subsystem'),
-    []
+    () =>
+      (getRegistryTree().children || []).filter((c) => c.type === 'Subsystem'),
+    [runsTick]
   );
 
   const entityOptions: ResourceEntity[] = useMemo(() => {
@@ -124,8 +132,62 @@ const DeepResearch: React.FC = () => {
   }, [searchParams]);
 
   const selectedEntity = entityId
-    ? ALL_ENTITIES.find((e) => e.id === entityId) || null
+    ? ALL_ENTITIES.find((e) => e.id === entityId) ||
+      subsystems.find((s) => s.id === entityId) ||
+      null
     : null;
+
+  const defaultSubsystemId = (fromId?: string): string => {
+    if (!fromId) return '';
+    if (subsystems.some((s) => s.id === fromId)) return fromId;
+    for (const s of subsystems) {
+      if ((s.children || []).some((c) => c.id === fromId)) return s.id;
+    }
+    return '';
+  };
+
+  const currentRunShape = (): ResearchRun =>
+    runFromCurrent({
+      title: saveTitle,
+      query,
+      resultText: result || '',
+      kind: KIND_META[kind].label,
+      kindId: kind,
+      provider,
+      modelId,
+      modelLabel: activeModelLabel,
+      entityName: selectedEntity?.name,
+      entityType: selectedEntity?.type,
+    });
+
+  const handleAttachWord = async (run: ResearchRun, key: string) => {
+    const targetId = attachTarget[key] || defaultSubsystemId(run.entityId) || entityId;
+    const sub = subsystems.find((s) => s.id === targetId);
+    if (!sub) {
+      setAttachMsg('Pick a subsystem first.');
+      return;
+    }
+    setAttachingId(key);
+    setAttachMsg(null);
+    try {
+      const file = buildRunDocxFile(run);
+      await attachDocumentToEntity(sub.id, file, {
+        name: run.title || file.name.replace(/\.docx$/i, ''),
+        kind: 'analysis',
+        description: `Deep Research · ${run.kind} · ${run.modelLabel}`,
+      });
+      setAttachMsg(`Word attached to ${sub.name}. Open System Registry to see it.`);
+    } catch (e: any) {
+      const raw = e?.message || String(e);
+      setAttachMsg(
+        /not authenticated|unauth|sign in|No current user/i.test(raw)
+          ? 'Sign in first — attachments go to the team cloud, not this device.'
+          : raw
+      );
+    } finally {
+      setAttachingId(null);
+    }
+  };
 
   const activeModelLabel =
     RESEARCH_MODELS.find((m) => m.id === modelId)?.label || modelId;
@@ -355,6 +417,11 @@ const DeepResearch: React.FC = () => {
                 <FileDown size={11} /> Export all as Markdown
               </button>
             )}
+            {attachMsg && (
+              <p className="text-[11px] text-emerald-300/90 bg-emerald-950/20 border border-emerald-900/40 rounded-xl px-2.5 py-1.5">
+                {attachMsg}
+              </p>
+            )}
             {runs.length === 0 && (
               <p className="text-xs text-zinc-600">
                 After a run, use Save this run. Each card stores model, type, and Registry
@@ -424,6 +491,38 @@ const DeepResearch: React.FC = () => {
                     >
                       <Trash2 size={11} /> Remove
                     </button>
+                  </div>
+                  <div className="mt-2 flex flex-col gap-1.5">
+                    <label className="text-[10px] text-zinc-500">Attach Word to subsystem</label>
+                    <div className="flex gap-1.5">
+                      <select
+                        value={
+                          attachTarget[run.id] ||
+                          defaultSubsystemId(run.entityId) ||
+                          ''
+                        }
+                        onChange={(e) =>
+                          setAttachTarget((prev) => ({ ...prev, [run.id]: e.target.value }))
+                        }
+                        className="flex-1 min-w-0 bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1 text-[11px] text-zinc-200 focus:outline-none focus:border-blue-500"
+                      >
+                        <option value="">Select subsystem…</option>
+                        {subsystems.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={attachingId === run.id}
+                        onClick={() => void handleAttachWord(run, run.id)}
+                        className="shrink-0 px-2 py-1 rounded-lg text-[11px] bg-zinc-800 border border-zinc-600 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 inline-flex items-center gap-1"
+                      >
+                        <Paperclip size={11} />
+                        {attachingId === run.id ? 'Attaching…' : 'Attach'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -543,6 +642,33 @@ const DeepResearch: React.FC = () => {
                     className="px-3 py-1.5 rounded-xl text-xs bg-zinc-950 border border-zinc-700 text-zinc-300 hover:border-zinc-500"
                   >
                     PDF
+                  </button>
+                  <select
+                    value={
+                      attachTarget.current ||
+                      defaultSubsystemId(selectedEntity?.id) ||
+                      ''
+                    }
+                    onChange={(e) =>
+                      setAttachTarget((prev) => ({ ...prev, current: e.target.value }))
+                    }
+                    className="bg-zinc-950 border border-zinc-700 rounded-xl px-2 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">Attach Word to…</option>
+                    {subsystems.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={attachingId === 'current'}
+                    onClick={() => void handleAttachWord(currentRunShape(), 'current')}
+                    className="px-3 py-1.5 rounded-xl text-xs bg-zinc-800 border border-zinc-600 text-zinc-200 hover:bg-zinc-700 disabled:opacity-40 inline-flex items-center gap-1.5"
+                  >
+                    <Paperclip size={12} />
+                    {attachingId === 'current' ? 'Attaching…' : 'Attach Word'}
                   </button>
                 </div>
               )}

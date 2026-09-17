@@ -181,7 +181,11 @@ function zipStore(files: { path: string; content: string }[]): Blob {
   });
 }
 
-export function exportRunDocx(run: ResearchRun): void {
+export function runDocxFileName(run: ResearchRun): string {
+  return `vector-research-${slug(run.title)}-${stamp(run.createdAt)}.docx`;
+}
+
+export function buildRunDocxBlob(run: ResearchRun): Blob {
   const heading = (t: string) =>
     `<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>${xmlEscape(t)}</w:t></w:r></w:p>`;
   const h2 = (t: string) =>
@@ -225,7 +229,17 @@ export function exportRunDocx(run: ResearchRun): void {
     { path: 'word/document.xml', content: documentXml },
   ]);
 
-  downloadBlob(`vector-research-${slug(run.title)}-${stamp(run.createdAt)}.docx`, blob);
+  return blob;
+}
+
+export function exportRunDocx(run: ResearchRun): void {
+  downloadBlob(runDocxFileName(run), buildRunDocxBlob(run));
+}
+
+export function buildRunDocxFile(run: ResearchRun): File {
+  return new File([buildRunDocxBlob(run)], runDocxFileName(run), {
+    type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  });
 }
 
 function pdfEscape(s: string): string {
