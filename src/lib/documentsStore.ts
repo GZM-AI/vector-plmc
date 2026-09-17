@@ -329,6 +329,45 @@ export async function attachDocumentToEntity(
   return record
 }
 
+function dataUrlToBlobUrl(dataUrl: string): string {
+  const comma = dataUrl.indexOf(',')
+  const meta = comma >= 0 ? dataUrl.slice(0, comma) : 'data:application/octet-stream;base64'
+  const payload = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl
+  const mime = /data:([^;]+)/.exec(meta)?.[1] || 'application/octet-stream'
+  const binary = atob(payload)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+  return URL.createObjectURL(new Blob([bytes], { type: mime }))
+}
+
+export async function openAttachedDocument(doc: Document): Promise<void> {
+  const url = await getDocumentDownloadUrl(doc)
+  const name = doc.fileName || `${doc.name || 'attachment'}.docx`
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    const href = url.startsWith('data:') ? dataUrlToBlobUrl(url) : url
+    const a = document.createElement('a')
+    a.href = href
+    a.download = name
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    if (href.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(href), 2000)
+    return
+  }
+  const opened = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.target = '_blank'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+}
+
 export async function getDocumentDownloadUrl(doc: Document): Promise<string> {
   if (!doc.storageKey) throw new Error('This document has no file in storage.')
   if (doc.storageKey.startsWith('local:')) {

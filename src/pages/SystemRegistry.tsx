@@ -54,7 +54,7 @@ import {
   documentsForEntity,
   subscribeDocumentsStore,
   attachDocumentToEntity,
-  getDocumentDownloadUrl,
+  openAttachedDocument,
   unlinkDocumentFromEntity,
   hydrateDocumentsStoreFromCloud,
   getDocumentsError,
@@ -1544,8 +1544,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     title="Open / download"
                     onClick={async () => {
                       try {
-                        const url = await getDocumentDownloadUrl(d);
-                        window.open(url, '_blank', 'noopener,noreferrer');
+                        await openAttachedDocument(d);
                       } catch (err) {
                         setAttachErr(err instanceof Error ? err.message : String(err));
                       }
