@@ -68,10 +68,10 @@ export function exportRunsMarkdown(runs: ResearchRun[]): void {
 
 function xmlEscape(s: string): string {
   return s
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"');
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
 }
 
 function docxParagraphs(text: string): string {
@@ -80,7 +80,20 @@ function docxParagraphs(text: string): string {
   return blocks
     .map((line) => {
       if (!line) return '<w:p/>';
-      return `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r></w:p>`;
+      let style = '';
+      let body = line;
+      if (/^#\s+/.test(line)) {
+        style = 'Heading1';
+        body = line.replace(/^#\s+/, '');
+      } else if (/^##\s+/.test(line)) {
+        style = 'Heading2';
+        body = line.replace(/^##\s+/, '');
+      } else if (/^###\s+/.test(line)) {
+        style = 'Heading3';
+        body = line.replace(/^###\s+/, '');
+      }
+      const pPr = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : '';
+      return `<w:p>${pPr}<w:r><w:t xml:space="preserve">${xmlEscape(body)}</w:t></w:r></w:p>`;
     })
     .join('');
 }

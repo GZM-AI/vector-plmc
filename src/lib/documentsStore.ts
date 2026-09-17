@@ -340,11 +340,17 @@ function dataUrlToBlobUrl(dataUrl: string): string {
   return URL.createObjectURL(new Blob([bytes], { type: mime }))
 }
 
+export type PreviewBlock = {
+  type: 'h1' | 'h2' | 'h3' | 'p' | 'li' | 'blank'
+  text: string
+}
+
 export type DocumentPreview = {
   title: string
   fileName?: string
-  kind: 'text' | 'image' | 'pdf' | 'file'
+  kind: 'article' | 'text' | 'image' | 'pdf' | 'file'
   text?: string
+  blocks?: PreviewBlock[]
   objectUrl?: string
 }
 
@@ -379,15 +385,58 @@ function zipStoreRead(buf: Uint8Array, wantPath: string): string | null {
   return null
 }
 
-function docxXmlToText(xml: string): string {
-  const withBreaks = xml
+function paragraphPlain(xmlChunk: string): string {
+  const withBreaks = xmlChunk
     .replace(/<w:tab\/>/g, '\t')
     .replace(/<w:br\b[^>]*\/>/g, '\n')
-    .replace(/<\/w:p>/g, '\n')
-  const texts = [...withBreaks.matchAll(/<w:t\b[^>]*>([^<]*)<\/w:t>/g)].map((m) =>
+  const parts = [...withBreaks.matchAll(/<w:t\b[^>]*>([^<]*)<\/w:t>/g)].map((m) =>
     decodeXmlEntities(m[1])
   )
-  return texts.join('').replace(/\n{3,}/g, '\n\n').trim()
+  return parts.join('')
+}
+
+function lineToBlock(line: string, style?: string): PreviewBlock {
+  const raw = line.replace(/\s+$/, '')
+  if (!raw.trim()) return { type: 'blank', text: '' }
+  if (style === 'Heading1' || /^#\s+/.test(raw))
+    return { type: 'h1', text: raw.replace(/^#\s+/, '') }
+  if (style === 'Heading2' || /^##\s+/.test(raw))
+    return { type: 'h2', text: raw.replace(/^##\s+/, '') }
+  if (style === 'Heading3' || /^###\s+/.test(raw))
+    return { type: 'h3', text: raw.replace(/^###\s+/, '') }
+  if (/^\s*([-*•]|\d+\.)\s+/.test(raw))
+    return { type: 'li', text: raw.replace(/^\s*([-*•]|\d+\.)\s+/, '') }
+  return { type: 'p', text: raw }
+}
+
+function docxXmlToBlocks(xml: string): PreviewBlock[] {
+  const chunks = xml.split(/<\/w:p>/)
+  const blocks: PreviewBlock[] = []
+  for (const chunk of chunks) {
+    if (!/<w:t\b/.test(chunk) && !/<w:p[ >]/.test(chunk) && !chunk.includes('<w:p')) {
+      continue
+    }
+    const style = /w:pStyle[^>]*w:val="([^"]+)"/.exec(chunk)?.[1]
+    const text = paragraphPlain(chunk)
+    if (!text && !style) {
+      if (blocks.length && blocks[blocks.length - 1].type !== 'blank') {
+        blocks.push({ type: 'blank', text: '' })
+      }
+      continue
+    }
+    if (text.includes('\n')) {
+      text.split('\n').forEach((line) => blocks.push(lineToBlock(line, style)))
+    } else {
+      blocks.push(lineToBlock(text, style))
+    }
+  }
+  while (blocks.length && blocks[0].type === 'blank') blocks.shift()
+  while (blocks.length && blocks[blocks.length - 1].type === 'blank') blocks.pop()
+  return blocks
+}
+
+function textToBlocks(text: string): PreviewBlock[] {
+  return text.split(/\r?\n/).map((line) => lineToBlock(line))
 }
 
 async function urlToBytes(url: string): Promise<Uint8Array> {
@@ -426,7 +475,14 @@ export async function previewAttachedDocument(doc: Document): Promise<DocumentPr
     const bytes = await urlToBytes(url)
     const xml = zipStoreRead(bytes, 'word/document.xml')
     if (xml) {
-      return { title, fileName: doc.fileName, kind: 'text', text: docxXmlToText(xml) }
+      const blocks = docxXmlToBlocks(xml)
+      return {
+        title,
+        fileName: doc.fileName,
+        kind: 'article',
+        blocks,
+        text: blocks.map((b) => (b.type === 'blank' ? '' : b.text)).join('\n'),
+      }
     }
     return {
       title,
@@ -437,7 +493,14 @@ export async function previewAttachedDocument(doc: Document): Promise<DocumentPr
   }
   if (mime.startsWith('text/') || /\.(md|txt|csv|json)$/.test(name)) {
     const bytes = await urlToBytes(url)
-    return { title, fileName: doc.fileName, kind: 'text', text: new TextDecoder().decode(bytes) }
+    const raw = new TextDecoder().decode(bytes)
+    return {
+      title,
+      fileName: doc.fileName,
+      kind: 'article',
+      blocks: textToBlocks(raw),
+      text: raw,
+    }
   }
   return {
     title,

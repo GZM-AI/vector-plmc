@@ -56,6 +56,7 @@ import {
   attachDocumentToEntity,
   openAttachedDocument,
   previewAttachedDocument,
+  type DocumentPreview,
   unlinkDocumentFromEntity,
   hydrateDocumentsStoreFromCloud,
   getDocumentsError,
@@ -608,13 +609,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [attachBusy, setAttachBusy] = useState(false);
   const [attachErr, setAttachErr] = useState<string | null>(null);
   const [previewDoc, setPreviewDoc] = useState<Document | null>(null);
-  const [previewBody, setPreviewBody] = useState<{
-    title: string;
-    fileName?: string;
-    kind: 'text' | 'image' | 'pdf' | 'file';
-    text?: string;
-    objectUrl?: string;
-  } | null>(null);
+  const [previewBody, setPreviewBody] = useState<DocumentPreview | null>(null);
   const [previewBusy, setPreviewBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -1656,6 +1651,43 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             <div className="flex-1 overflow-auto p-5">
               {previewBusy && (
                 <p className="text-sm text-zinc-400 animate-pulse">Opening…</p>
+              )}
+              {!previewBusy && previewBody?.kind === 'article' && (
+                <article className="max-w-none">
+                  {(previewBody.blocks || []).map((b, i) => {
+                    if (b.type === 'blank') return <div key={i} className="h-3" />;
+                    if (b.type === 'h1')
+                      return (
+                        <h1 key={i} className="text-2xl font-semibold text-white mt-1 mb-4">
+                          {b.text}
+                        </h1>
+                      );
+                    if (b.type === 'h2')
+                      return (
+                        <h2 key={i} className="text-lg font-medium text-sky-300 mt-6 mb-2">
+                          {b.text}
+                        </h2>
+                      );
+                    if (b.type === 'h3')
+                      return (
+                        <h3 key={i} className="text-base font-medium text-zinc-100 mt-4 mb-1.5">
+                          {b.text}
+                        </h3>
+                      );
+                    if (b.type === 'li')
+                      return (
+                        <div key={i} className="flex gap-2 text-sm text-zinc-200 leading-relaxed mb-1 pl-1">
+                          <span className="text-zinc-500 shrink-0">•</span>
+                          <span className="whitespace-pre-wrap">{b.text}</span>
+                        </div>
+                      );
+                    return (
+                      <p key={i} className="text-sm text-zinc-200 leading-relaxed mb-3 whitespace-pre-wrap">
+                        {b.text}
+                      </p>
+                    );
+                  })}
+                </article>
               )}
               {!previewBusy && previewBody?.kind === 'text' && (
                 <pre className="text-sm text-zinc-200 whitespace-pre-wrap font-sans leading-relaxed">
