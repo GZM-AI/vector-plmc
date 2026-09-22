@@ -1,6 +1,6 @@
 /**
  * Shared Cognito lock — Vector + PID
- * Do not let a sandbox/pipeline defineAuth() pool replace these IDs.
+ * One pool: AWS-USER-POOL. Use the client PID already signs in with.
  */
 import { Amplify } from 'aws-amplify';
 
@@ -28,7 +28,6 @@ export function applySharedCognitoLock(outputs: Record<string, unknown>): Record
   return { ...outputs, auth };
 }
 
-/** Amplify v6 runtime shape (Auth.Cognito) — required so email is the username. */
 export function lockAmplifyAuthRuntime(): void {
   const current = Amplify.getConfig();
   const cognito = {
