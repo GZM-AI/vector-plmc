@@ -7,7 +7,7 @@ import { Amplify } from 'aws-amplify';
 export const SHARED_COGNITO = {
   region: 'us-west-2',
   userPoolId: 'us-west-2_1Kry5Hphg',
-  userPoolClientId: '44nd3qek7cve9pnqm4coci398h',
+  userPoolClientId: '6u5qbu14c6mnovk8s5u5lio74g',
   identityPoolId: 'us-west-2:ef39ef02-876b-4d0b-912c-582b9c21b56b',
 } as const;
 
