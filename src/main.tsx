@@ -11,7 +11,11 @@ import { ensurePlanningHydrated } from './lib/planningStore'
 import { hydrateSuppliersStoreFromCloud } from './lib/suppliersStore'
 import { hydrateDocumentsStoreFromCloud } from './lib/documentsStore'
 import { hydrateResearchStoreFromCloud } from './lib/researchStore'
-import { applySharedCognitoLock, SHARED_COGNITO } from './lib/sharedCognito'
+import {
+  applySharedCognitoLock,
+  lockAmplifyAuthRuntime,
+  SHARED_COGNITO,
+} from './lib/sharedCognito'
 import type { Schema } from '../amplify/data/resource'
 
 async function boot() {
@@ -20,10 +24,13 @@ async function boot() {
     if (!res.ok) throw new Error(`amplify_outputs.json HTTP ${res.status}`)
     const outputs = (await res.json()) as Record<string, unknown>
     Amplify.configure(applySharedCognitoLock(outputs) as never)
+    lockAmplifyAuthRuntime()
+    const cognito = (Amplify.getConfig().Auth as { Cognito?: { userPoolId?: string; userPoolClientId?: string } })
+      ?.Cognito
     console.log(
       'PLM Console — Cognito lock',
-      SHARED_COGNITO.userPoolId,
-      SHARED_COGNITO.userPoolClientId
+      cognito?.userPoolId,
+      cognito?.userPoolClientId
     )
 
     const client = generateClient<Schema>({ authMode: 'apiKey' })

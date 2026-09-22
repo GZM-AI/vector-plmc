@@ -2,6 +2,8 @@
  * Shared Cognito lock — Vector + PID
  * Do not let a sandbox/pipeline defineAuth() pool replace these IDs.
  */
+import { Amplify } from 'aws-amplify';
+
 export const SHARED_COGNITO = {
   region: 'us-west-2',
   userPoolId: 'us-west-2_1Kry5Hphg',
@@ -22,4 +24,23 @@ export function applySharedCognitoLock(outputs: Record<string, unknown>): Record
     mfa_configuration: 'NONE',
   };
   return { ...outputs, auth };
+}
+
+/** Amplify v6 runtime shape (Auth.Cognito) — required so email is the username. */
+export function lockAmplifyAuthRuntime(): void {
+  const current = Amplify.getConfig();
+  const cognito = (current.Auth as { Cognito?: Record<string, unknown> } | undefined)?.Cognito || {};
+  Amplify.configure({
+    ...current,
+    Auth: {
+      ...current.Auth,
+      Cognito: {
+        ...cognito,
+        userPoolId: SHARED_COGNITO.userPoolId,
+        userPoolClientId: SHARED_COGNITO.userPoolClientId,
+        identityPoolId: SHARED_COGNITO.identityPoolId,
+        loginWith: { email: true },
+      },
+    },
+  });
 }

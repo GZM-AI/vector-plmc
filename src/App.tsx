@@ -2,6 +2,7 @@ import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Authenticator, ThemeProvider, Theme } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
+import { SHARED_COGNITO } from './lib/sharedCognito';
 
 import Sidebar from './components/layout/Sidebar';
 import Dashboard from './pages/Dashboard';
@@ -37,7 +38,27 @@ const App: React.FC = () => {
       <Authenticator
         hideSignUp
         loginMechanisms={['email']}
-        variation="modal"
+        formFields={{
+          signIn: {
+            username: {
+              label: 'Email',
+              placeholder: 'PID email',
+              type: 'email',
+            },
+          },
+        }}
+        components={{
+          Header() {
+            return (
+              <div className="text-center px-6 pt-6">
+                <div className="text-lg font-semibold text-white">Vector</div>
+                <div className="text-[11px] text-zinc-500 mt-1">
+                  Same login as Patent Design · {SHARED_COGNITO.userPoolId}
+                </div>
+              </div>
+            );
+          },
+        }}
       >
         {({ signOut, user }) => (
           <Router>
