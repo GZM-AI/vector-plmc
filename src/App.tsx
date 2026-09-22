@@ -2,6 +2,7 @@ import React from 'react';
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { Authenticator, ThemeProvider, Theme } from '@aws-amplify/ui-react';
 import '@aws-amplify/ui-react/styles.css';
+import { signIn } from 'aws-amplify/auth';
 import { SHARED_COGNITO } from './lib/sharedCognito';
 
 import Sidebar from './components/layout/Sidebar';
@@ -38,6 +39,24 @@ const App: React.FC = () => {
       <Authenticator
         hideSignUp
         loginMechanisms={['email']}
+        services={{
+          async handleSignIn(input: { username?: string; password?: string }) {
+            const username = (input.username || '').trim();
+            console.log(
+              '[Vector auth] signIn',
+              username,
+              SHARED_COGNITO.userPoolId,
+              SHARED_COGNITO.userPoolClientId
+            );
+            try {
+              return await signIn({ username, password: input.password || '' });
+            } catch (err) {
+              const e = err as { name?: string; message?: string };
+              console.error('[Vector auth] signIn failed', e?.name, e?.message, err);
+              throw new Error(`${e?.name || 'AuthError'}: ${e?.message || String(err)}`);
+            }
+          },
+        }}
         formFields={{
           signIn: {
             username: {

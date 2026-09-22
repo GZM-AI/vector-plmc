@@ -12,16 +12,18 @@ export const SHARED_COGNITO = {
 } as const;
 
 export function applySharedCognitoLock(outputs: Record<string, unknown>): Record<string, unknown> {
+  const prev = { ...((outputs.auth as Record<string, unknown>) || {}) };
+  delete prev.identity_pool_id;
   const auth = {
-    ...((outputs.auth as Record<string, unknown>) || {}),
+    ...prev,
     aws_region: SHARED_COGNITO.region,
     user_pool_id: SHARED_COGNITO.userPoolId,
     user_pool_client_id: SHARED_COGNITO.userPoolClientId,
-    identity_pool_id: SHARED_COGNITO.identityPoolId,
     username_attributes: ['email'],
     standard_required_attributes: ['email'],
     user_verification_types: ['email'],
     mfa_configuration: 'NONE',
+    unauthenticated_identities_enabled: false,
   };
   return { ...outputs, auth };
 }
@@ -29,7 +31,10 @@ export function applySharedCognitoLock(outputs: Record<string, unknown>): Record
 /** Amplify v6 runtime shape (Auth.Cognito) — required so email is the username. */
 export function lockAmplifyAuthRuntime(): void {
   const current = Amplify.getConfig();
-  const cognito = (current.Auth as { Cognito?: Record<string, unknown> } | undefined)?.Cognito || {};
+  const cognito = {
+    ...((current.Auth as { Cognito?: Record<string, unknown> } | undefined)?.Cognito || {}),
+  };
+  delete cognito.identityPoolId;
   Amplify.configure({
     ...current,
     Auth: {
@@ -38,7 +43,6 @@ export function lockAmplifyAuthRuntime(): void {
         ...cognito,
         userPoolId: SHARED_COGNITO.userPoolId,
         userPoolClientId: SHARED_COGNITO.userPoolClientId,
-        identityPoolId: SHARED_COGNITO.identityPoolId,
         loginWith: { email: true },
       },
     },
