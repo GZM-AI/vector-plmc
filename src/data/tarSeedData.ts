@@ -1,18 +1,21 @@
 /**
- * TAR™ (Trajectory Adjusting Rifle) — Canonical Seed Dataset
+ * TAR™ Family — Canonical Seed Dataset
  * Vector · Product Lifecycle Management
  *
- * Hierarchy (strict four levels):
- *   TAR™ (System)
- *    └── Subsystem
- *         └── Component
- *              └── Element  (kind: hardware | software | interface | integrator | other)
+ * Hierarchy:
+ *   TAR Family (thin root)
+ *    ├── TAR™ (System)
+ *    │    └── Subsystem → Component → Element
+ *    ├── S-TAR (System)
+ *    │    └── Subsystem → Component → Element
+ *    └── M-TAR (System)
+ *         └── Subsystem → Component → Element
  *
- * Vertical Integrators = per-subsystem candidates only (not shared),
- * modeled as Element + kind: 'integrator' under each subsystem's Core Elements component.
+ * Vertical Integrators remain per-subsystem (independent per platform).
+ * Similar component/element names may exist under multiple Systems but are distinct instances.
  *
- * Phase 0: every entity carries revision + ReleaseStatus + lastModified/modifiedBy
- * and optional attachmentIds linking to Document records (see documentsSeed.ts).
+ * Phase 0+: every entity carries revision + ReleaseStatus + lastModified/modifiedBy
+ * and optional attachmentIds linking to Document records.
  */
 import type {
   ResourceEntity,
@@ -100,7 +103,7 @@ function withParent(parentId: string, nodes: ResourceEntity[]): ResourceEntity[]
   }));
 }
 
-// ─── Subsystems ──────────────────────────────────────────────────────────────
+// ─── TAR™ Subsystems (unchanged content, parentId remains sys-tar) ──────────
 
 const SUB_SCOPE: ResourceEntity = e({
   id: 'sub-scope',
@@ -497,6 +500,8 @@ const SUB_CLOSED_LOOP: ResourceEntity = e({
   ]),
 });
 
+// ─── Platform Systems ────────────────────────────────────────────────────────
+
 export const TAR_SYSTEM: ResourceEntity = e({
   id: 'sys-tar',
   name: 'TAR™',
@@ -504,7 +509,7 @@ export const TAR_SYSTEM: ResourceEntity = e({
   description:
     'Trajectory Adjusting Rifle — system-of-systems spanning sensing, computation, closed-loop control, and actuation.',
   tags: ['platform', 'TAR', 'prototype'],
-  parentId: null,
+  parentId: 'sys-tar-family',
   status: 'In Review',
   revision: '0.9',
   lifecycleStage: 'in-design',
@@ -525,7 +530,133 @@ export const TAR_SYSTEM: ResourceEntity = e({
   ],
 });
 
-export const TAR_TREE = TAR_SYSTEM;
+/** S-TAR — single-shot sniper with Dragonhunter + articulated barrel. Placeholder subsystems; expand later. */
+export const STAR_SYSTEM: ResourceEntity = e({
+  id: 'sys-star',
+  name: 'S-TAR',
+  type: 'System',
+  description:
+    'Single-shot sniper rifle using the Dragonhunter system and an articulated barrel for more accurate firing.',
+  tags: ['platform', 'S-TAR', 'sniper', 'dragonhunter'],
+  parentId: 'sys-tar-family',
+  status: 'Draft',
+  revision: 'A',
+  lifecycleStage: 'concept',
+  children: withParent('sys-star', [
+    e({
+      id: 'sub-star-dragonhunter',
+      name: 'Dragonhunter Integration',
+      type: 'Subsystem',
+      description: 'Integration of the Dragonhunter system for S-TAR.',
+      parentId: 'sys-star',
+      tags: ['dragonhunter'],
+      children: [
+        coreElements('sub-star-dragonhunter', 'Dragonhunter Integration', [
+          verticalIntegrators('sub-star-dragonhunter-core-elements', 'Dragonhunter Integration'),
+        ]),
+      ],
+    }),
+    e({
+      id: 'sub-star-articulated-barrel',
+      name: 'Articulated Barrel',
+      type: 'Subsystem',
+      description: 'Articulated barrel assembly for improved accuracy on S-TAR.',
+      parentId: 'sys-star',
+      tags: ['barrel', 'articulated'],
+      children: [
+        coreElements('sub-star-articulated-barrel', 'Articulated Barrel', [
+          verticalIntegrators('sub-star-articulated-barrel-core-elements', 'Articulated Barrel'),
+        ]),
+      ],
+    }),
+    e({
+      id: 'sub-star-optics',
+      name: 'Optics & Sighting',
+      type: 'Subsystem',
+      description: 'Optics and sighting specific to the S-TAR sniper platform.',
+      parentId: 'sys-star',
+      tags: ['optics'],
+      children: [
+        coreElements('sub-star-optics', 'Optics & Sighting', [
+          verticalIntegrators('sub-star-optics-core-elements', 'Optics & Sighting'),
+        ]),
+      ],
+    }),
+  ]),
+});
+
+/** M-TAR — mounted TAR for technical vehicles, armored vehicles, and helicopters. Placeholder subsystems. */
+export const MTAR_SYSTEM: ResourceEntity = e({
+  id: 'sys-mtar',
+  name: 'M-TAR',
+  type: 'System',
+  description:
+    'Mounted-TAR for use on technical vehicles, armored vehicles, and helicopters.',
+  tags: ['platform', 'M-TAR', 'mounted', 'vehicle'],
+  parentId: 'sys-tar-family',
+  status: 'Draft',
+  revision: 'A',
+  lifecycleStage: 'concept',
+  children: withParent('sys-mtar', [
+    e({
+      id: 'sub-mtar-mount',
+      name: 'Vehicle / Aircraft Mount',
+      type: 'Subsystem',
+      description: 'Mounting interfaces for technical vehicles, armored vehicles, and helicopters.',
+      parentId: 'sys-mtar',
+      tags: ['mount', 'vehicle'],
+      children: [
+        coreElements('sub-mtar-mount', 'Vehicle / Aircraft Mount', [
+          verticalIntegrators('sub-mtar-mount-core-elements', 'Vehicle / Aircraft Mount'),
+        ]),
+      ],
+    }),
+    e({
+      id: 'sub-mtar-power',
+      name: 'Vehicle Power Integration',
+      type: 'Subsystem',
+      description: 'Power sourcing and distribution from host vehicle or aircraft.',
+      parentId: 'sys-mtar',
+      tags: ['power'],
+      children: [
+        coreElements('sub-mtar-power', 'Vehicle Power Integration', [
+          verticalIntegrators('sub-mtar-power-core-elements', 'Vehicle Power Integration'),
+        ]),
+      ],
+    }),
+    e({
+      id: 'sub-mtar-stabilization',
+      name: 'Stabilization & Actuation',
+      type: 'Subsystem',
+      description: 'Stabilization and actuation adapted for mounted use.',
+      parentId: 'sys-mtar',
+      tags: ['stabilization', 'actuation'],
+      children: [
+        coreElements('sub-mtar-stabilization', 'Stabilization & Actuation', [
+          verticalIntegrators('sub-mtar-stabilization-core-elements', 'Stabilization & Actuation'),
+        ]),
+      ],
+    }),
+  ]),
+});
+
+/** Thin family root — always expanded in Registry Tree; not editable. */
+export const TAR_FAMILY: ResourceEntity = e({
+  id: 'sys-tar-family',
+  name: 'TAR Family',
+  type: 'System',
+  description:
+    'Product family containing TAR™, S-TAR, and M-TAR platforms. Thin root for navigation; not a product itself.',
+  tags: ['family', 'root'],
+  parentId: null,
+  status: 'Released',
+  revision: '1.0',
+  lifecycleStage: 'in-design',
+  children: [TAR_SYSTEM, STAR_SYSTEM, MTAR_SYSTEM],
+});
+
+/** Canonical tree root (family). Registry Tree starts here. */
+export const TAR_TREE = TAR_FAMILY;
 
 export const SUBSYSTEM_COLORS: Record<string, string> = {
   'sub-scope': 'rose',
@@ -540,6 +671,13 @@ export const SUBSYSTEM_COLORS: Record<string, string> = {
   'sub-trigger': 'pink',
   'sub-power': 'amber',
   'sub-closed-loop': 'indigo',
+  // S-TAR / M-TAR placeholders (extend as subsystems are added)
+  'sub-star-dragonhunter': 'emerald',
+  'sub-star-articulated-barrel': 'slate',
+  'sub-star-optics': 'fuchsia',
+  'sub-mtar-mount': 'lime',
+  'sub-mtar-power': 'amber',
+  'sub-mtar-stabilization': 'cyan',
 };
 
 function flattenTree(node: ResourceEntity, acc: ResourceEntity[] = []): ResourceEntity[] {
