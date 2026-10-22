@@ -163,9 +163,10 @@ const SystemArchitecture: React.FC = () => {
 
   const silhouetteSrc = useMemo(() => {
     const id = activeSystem?.id;
-    if (id === 'sys-star') return '/images/star-system-map.png';
-    if (id === 'sys-mtar') return '/images/mtar-system-map.png';
-    return '/images/tar-system-map.png';
+    // Cache-bust query keeps browser from serving a stale silhouette when switching platforms.
+    if (id === 'sys-star') return '/images/star-system-map.png?v=star';
+    if (id === 'sys-mtar') return '/images/mtar-system-map.png?v=mtar';
+    return '/images/tar-system-map.png?v=tar';
   }, [activeSystem]);
 
   const subsystems = useMemo(
@@ -403,6 +404,7 @@ const SystemArchitecture: React.FC = () => {
             style={{ userSelect: 'none' }}
           >
             <img
+              key={silhouetteSrc}
               src={silhouetteSrc}
               alt={`${activeSystem?.name || 'TAR'} system silhouette`}
               className="w-full h-auto block pointer-events-none"
