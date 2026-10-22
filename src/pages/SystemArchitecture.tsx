@@ -7,6 +7,8 @@ import {
   getMergedAllEntities,
   subscribeConfigStore,
 } from '../lib/configStore';
+import { PlatformSelector } from '../components/PlatformSelector';
+import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
 import {
   type Hotspot,
   DEFAULT_HOTSPOTS,
@@ -74,6 +76,7 @@ const SystemArchitecture: React.FC = () => {
   editModeRef.current = editMode;
 
   useEffect(() => subscribeConfigStore(() => setTreeTick((t) => t + 1)), []);
+  useEffect(() => subscribePlatform(() => setTreeTick((t) => t + 1)), []);
 
   const productTree = useMemo(() => {
     try {
@@ -156,9 +159,18 @@ const SystemArchitecture: React.FC = () => {
     };
   }, []);
 
+  const activeSystem = useMemo(() => getActiveSystem(productTree), [productTree, treeTick]);
+
+  const silhouetteSrc = useMemo(() => {
+    const id = activeSystem?.id;
+    if (id === 'sys-star') return '/images/star-system-map.png';
+    if (id === 'sys-mtar') return '/images/mtar-system-map.png';
+    return '/images/tar-system-map.png';
+  }, [activeSystem]);
+
   const subsystems = useMemo(
-    () => (productTree?.children || []).filter((c: any) => c.type === 'Subsystem'),
-    [productTree]
+    () => (activeSystem?.children || []).filter((c: any) => c.type === 'Subsystem'),
+    [activeSystem]
   );
 
   /** Chips follow Registry / right-menu subsystem order, not raw hotspot layout order. */
@@ -292,8 +304,9 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `TAR™ · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel}`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel}`}
           </p>
+          <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-3">
           <button
@@ -390,8 +403,8 @@ const SystemArchitecture: React.FC = () => {
             style={{ userSelect: 'none' }}
           >
             <img
-              src="/images/tar-system-map.png"
-              alt="TAR system silhouette"
+              src={silhouetteSrc}
+              alt={`${activeSystem?.name || 'TAR'} system silhouette`}
               className="w-full h-auto block pointer-events-none"
               draggable={false}
             />

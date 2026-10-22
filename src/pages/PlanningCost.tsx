@@ -15,6 +15,8 @@ import {
   Layers,
 } from 'lucide-react';
 import type { ResourceEntity } from '../types/plm';
+import { PlatformSelector } from '../components/PlatformSelector';
+import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
 import {
   getPlanLine,
   upsertTier,
@@ -275,15 +277,22 @@ function SubsystemBlock({
 const PlanningCost: React.FC = () => {
   const tree = useProductTree();
   const [tick, setTick] = useState(0);
+  const [platformTick, setPlatformTick] = useState(0);
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
 
   useEffect(() => subscribePlanningStore(() => setTick((t) => t + 1)), []);
+  useEffect(() => subscribePlatform(() => setPlatformTick((t) => t + 1)), []);
+
+  const activeSystem = useMemo(
+    () => (tree ? getActiveSystem(tree) : null),
+    [tree, platformTick]
+  );
 
   const subsystems = useMemo(() => {
-    if (!tree?.children) return [] as ResourceEntity[];
-    return tree.children.filter((c) => c.type === 'Subsystem');
-  }, [tree]);
+    if (!activeSystem?.children) return [] as ResourceEntity[];
+    return activeSystem.children.filter((c) => c.type === 'Subsystem');
+  }, [activeSystem]);
 
   const allParts = useMemo(() => {
     const list: ResourceEntity[] = [];
@@ -321,8 +330,9 @@ const PlanningCost: React.FC = () => {
             <CalendarClock className="text-blue-400" /> Planning &amp; Cost
           </h1>
           <p className="text-zinc-400 mt-1">
-            Estimated, quoted, and actual on every part · {allParts.length} cost lines
+            {activeSystem?.name || 'TAR™'} · Estimated, quoted, and actual on every part · {allParts.length} cost lines
           </p>
+          <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -413,7 +423,7 @@ const PlanningCost: React.FC = () => {
             <tbody>
               <tr className="bg-zinc-950 border-b border-zinc-700">
                 <td className="py-3 px-3 text-sm font-bold text-blue-300">
-                  {tree.name || 'TAR™'}
+                  {activeSystem?.name || 'TAR™'}
                 </td>
                 <td className="py-3 px-2 text-right text-sm text-zinc-300 tabular-nums">
                   {formatMoney(systemRollup.nre)}

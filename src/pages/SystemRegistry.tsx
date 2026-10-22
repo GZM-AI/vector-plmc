@@ -83,6 +83,8 @@ import {
   type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision } from '../lib/revisionUtils';
+import { PlatformSelector } from '../components/PlatformSelector';
+import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
 
 type ViewMode = 'overview' | 'tree';
 
@@ -2351,6 +2353,14 @@ const SystemRegistry: React.FC = () => {
 
   const registryTree = useMemo(() => getRegistryTree(), [historyTick]);
   const allEntities = useMemo(() => getMergedAllEntities(), [historyTick]);
+  const [platformTick, setPlatformTick] = useState(0);
+  useEffect(() => subscribePlatform(() => setPlatformTick((t) => t + 1)), []);
+
+  const activeSystem = useMemo(
+    () => getActiveSystem(registryTree),
+    [registryTree, platformTick]
+  );
+
   const rootId = registryTree.id;
 
   const [selectedId, setSelectedId] = useState<string | null>(rootId);
@@ -2410,8 +2420,8 @@ const SystemRegistry: React.FC = () => {
   }, [selectedId, registryTree, allEntities]);
 
   const subsystems = useMemo(
-    () => (registryTree.children || []).filter((c) => c.type === 'Subsystem'),
-    [registryTree]
+    () => (activeSystem?.children || []).filter((c) => c.type === 'Subsystem'),
+    [activeSystem]
   );
 
   const filteredSubsystems = useMemo(() => {
@@ -2474,8 +2484,9 @@ const SystemRegistry: React.FC = () => {
             <Box className="text-blue-400" /> System Registry
           </h1>
           <p className="text-zinc-400 mt-2">
-            Digital Thread · TAR™ · {subsystems.length} subsystems · {allEntities.length} entities
+            Digital Thread · {activeSystem?.name || 'TAR™'} · {subsystems.length} subsystems · {allEntities.length} entities
           </p>
+          <PlatformSelector className="mt-3" />
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">

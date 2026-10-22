@@ -22,6 +22,9 @@ import {
   subscribeConfigStore,
 } from '../lib/configStore';
 import { ALL_ENTITIES } from '../data/tarSeedData';
+import { PlatformSelector } from '../components/PlatformSelector';
+import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
+import { getRegistryTree } from '../lib/configStore';
 
 const STATUS_STYLE: Record<ReleaseStatus, string> = {
   Draft: 'bg-zinc-700 text-zinc-300',
@@ -32,6 +35,7 @@ const STATUS_STYLE: Record<ReleaseStatus, string> = {
 
 const Baselines: React.FC = () => {
   const [, setTick] = useState(0);
+  const [platformTick, setPlatformTick] = useState(0);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showCreate, setShowCreate] = useState(false);
@@ -40,6 +44,15 @@ const Baselines: React.FC = () => {
   const [status, setStatus] = useState<ReleaseStatus>('Draft');
 
   useEffect(() => subscribeConfigStore(() => setTick((t) => t + 1)), []);
+  useEffect(() => subscribePlatform(() => setPlatformTick((t) => t + 1)), []);
+
+  const activeSystem = useMemo(() => {
+    try {
+      return getActiveSystem(getRegistryTree());
+    } catch {
+      return null;
+    }
+  }, [platformTick]);
 
   const baselines = useMemo(() => getAllBaselines(), [/* tick via re-render */]);
   // force dependency on tick by reading state each render
@@ -84,8 +97,9 @@ const Baselines: React.FC = () => {
             <Bookmark className="text-blue-400" /> Baselines
           </h1>
           <p className="text-zinc-400 mt-2">
-            Named configuration snapshots · frozen entity → revision maps
+            {activeSystem?.name || 'TAR™'} · Named configuration snapshots · frozen entity → revision maps
           </p>
+          <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-3">
           <button

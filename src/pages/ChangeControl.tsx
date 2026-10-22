@@ -19,6 +19,9 @@ import {
   AlertTriangle,
 } from 'lucide-react';
 import type { ResourceEntity } from '../types/plm';
+import { PlatformSelector } from '../components/PlatformSelector';
+import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
+import { getRegistryTree } from '../lib/configStore';
 import {
   getChangeRequests,
   getChangeRequestById,
@@ -102,6 +105,7 @@ const emptyForm = () => ({
 
 const ChangeControl: React.FC = () => {
   const [tick, setTick] = useState(0);
+  const [platformTick, setPlatformTick] = useState(0);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<ChangeRequestStatus | 'All'>('All');
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -114,9 +118,18 @@ const ChangeControl: React.FC = () => {
   const [cloudHint, setCloudHint] = useState(false);
 
   useEffect(() => subscribeChangeStore(() => setTick((t) => t + 1)), []);
+  useEffect(() => subscribePlatform(() => setPlatformTick((t) => t + 1)), []);
   useEffect(() => {
     setCloudHint(isChangeCloudHydrated());
   }, [tick]);
+
+  const activeSystem = useMemo(() => {
+    try {
+      return getActiveSystem(getRegistryTree());
+    } catch {
+      return null;
+    }
+  }, [platformTick]);
 
   const requests = useMemo(() => getChangeRequests(), [tick]);
   const selected = selectedId ? getChangeRequestById(selectedId) : null;
@@ -288,9 +301,9 @@ const ChangeControl: React.FC = () => {
             <GitBranch className="text-blue-400" /> Change Control
           </h1>
           <p className="text-zinc-400 mt-1">
-            Formal change requests for TAR™ · {requests.length} request
-            {requests.length === 1 ? '' : 's'}
+            {activeSystem?.name || 'TAR™'} · Change requests and audit trail
           </p>
+          <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-2">
           <Link
