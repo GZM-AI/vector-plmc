@@ -15,6 +15,7 @@ import {
   loadHotspotLayout,
   saveHotspotLayout,
   resetHotspotLayoutLocal,
+  buildDefaultHotspots,
 } from '../lib/hotspotLayoutStore';
 
 function findInTree(node: any, id: string): any | null {
@@ -107,20 +108,6 @@ const SystemArchitecture: React.FC = () => {
   );
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const result = await loadHotspotLayout();
-      if (cancelled) return;
-      setHotspots(result.hotspots);
-      setLayoutSource(result.source);
-      setDirty(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       const drag = dragRef.current;
       const el = containerRef.current;
@@ -173,6 +160,29 @@ const SystemArchitecture: React.FC = () => {
     () => (activeSystem?.children || []).filter((c: any) => c.type === 'Subsystem'),
     [activeSystem]
   );
+
+  const platformId = activeSystem?.id || 'sys-tar';
+
+  const platformSubsystems = useMemo(
+    () => subsystems.map((c: any) => ({ id: c.id as string, name: c.name as string })),
+    [subsystems]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await loadHotspotLayout(platformId, platformSubsystems);
+      if (cancelled) return;
+      setHotspots(result.hotspots);
+      setLayoutSource(result.source);
+      setDirty(false);
+      setLoadedIds([]);
+      setActiveId(null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [platformId, platformSubsystems]);
 
   /** Chips follow Registry / right-menu subsystem order, not raw hotspot layout order. */
   const orderedHotspots = useMemo(() => {
@@ -258,7 +268,7 @@ const SystemArchitecture: React.FC = () => {
   };
 
   const resetZones = () => {
-    const next = resetHotspotLayoutLocal();
+    const next = resetHotspotLayoutLocal(platformId, platformSubsystems);
     setHotspots(next);
     setDirty(true);
     setLayoutSource('default');
@@ -269,7 +279,7 @@ const SystemArchitecture: React.FC = () => {
     setSaving(true);
     setSaveMessage(null);
     try {
-      const { cloudSaved } = await saveHotspotLayout(hotspots);
+      const { cloudSaved } = await saveHotspotLayout(platformId, hotspots);
       setDirty(false);
       setLayoutSource(cloudSaved ? 'cloud' : 'local');
       setSaveMessage(
@@ -282,7 +292,7 @@ const SystemArchitecture: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [hotspots]);
+  }, [hotspots, platformId]);
 
   const sourceLabel =
     layoutSource === 'loading'
