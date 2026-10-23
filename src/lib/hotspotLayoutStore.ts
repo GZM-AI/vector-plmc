@@ -316,15 +316,36 @@ function readLegacyTarCache(defaults: Hotspot[]): Hotspot[] | null {
   }
 }
 
-async function loadTarLayoutRaw(): Promise<Hotspot[] | null> {
+function scanLocalStorageForTar(): Hotspot[] | null {
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (!key || !/hotspot|layout/i.test(key)) continue;
+      const raw = localStorage.getItem(key);
+      if (!raw) continue;
+      const parsed = JSON.parse(raw);
+      const arr = Array.isArray(parsed) ? parsed : parsed?.hotspots;
+      if (!Array.isArray(arr) || !arr.length) continue;
+      const hit = arr.find((h: any) => h && (h.id === 'sub-scope' || h.label === 'Scope'));
+      if (hit && typeof hit.left === 'number') return arr as Hotspot[];
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+async function loadTarLayoutRaw(): Promise<{ hotspots: Hotspot[]; source: string }> {
   const tarDefaults = DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
   const cloud = await readFromCloud(getLayoutKey('sys-tar'), tarDefaults);
-  if (cloud && cloud.length) return cloud;
+  if (cloud && cloud.length) return { hotspots: cloud, source: 'cloud' };
   const local = readLocalCache('sys-tar', tarDefaults);
-  if (local && local.length) return local;
+  if (local && local.length) return { hotspots: local, source: 'local' };
   const legacy = readLegacyTarCache(tarDefaults);
-  if (legacy && legacy.length) return legacy;
-  return tarDefaults;
+  if (legacy && legacy.length) return { hotspots: legacy, source: 'legacy' };
+  const scanned = scanLocalStorageForTar();
+  if (scanned && scanned.length) return { hotspots: scanned, source: 'scan' };
+  return { hotspots: tarDefaults, source: 'default' };
 }
 
 
@@ -333,7 +354,9 @@ export async function copyTarLayoutToPlatform(
   platformId: PlatformIdLike,
   subsystems: { id: string; name: string }[]
 ): Promise<Hotspot[]> {
-  const tar = (await loadTarLayoutRaw()) || DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+  const loaded = await loadTarLayoutRaw();
+  const tar = loaded.hotspots;
+  console.log('[hotspotLayout] TAR source', loaded.source, tar.length);
   const byName = new Map(tar.map((h) => [h.label.trim().toLowerCase(), h]));
   const byId = new Map(tar.map((h) => [h.id, h]));
   const copied: Hotspot[] = subsystems.map((s, i) => {
