@@ -371,21 +371,25 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel}`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v3`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-3">
-          {platformId !== 'sys-tar' && (
-            <button
-              type="button"
-              onClick={copyFromTar}
-              disabled={saving}
-              className="px-4 py-2 rounded-xl text-sm border bg-zinc-900 border-zinc-700 text-zinc-300 font-medium"
-            >
-              Copy TAR zones
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={copyFromTar}
+            disabled={saving || platformId === 'sys-tar'}
+            title={platformId === 'sys-tar' ? 'Switch to S-TAR or M-TAR first' : 'Copy TAR zone titles and positions'}
+            className={
+              'px-4 py-2 rounded-xl text-sm border font-medium ' +
+              (platformId === 'sys-tar'
+                ? 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
+                : 'bg-blue-600 border-blue-500 text-white')
+            }
+          >
+            Copy TAR zones
+          </button>
           <button
             type="button"
             onClick={() => setEditMode((v) => !v)}
