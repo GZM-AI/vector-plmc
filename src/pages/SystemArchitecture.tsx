@@ -55,6 +55,9 @@ const SystemArchitecture: React.FC = () => {
   const [hotspots, setHotspots] = useState<Hotspot[]>(() =>
     DEFAULT_HOTSPOTS.map((h) => ({ ...h }))
   );
+  const [tarHotspots, setTarHotspots] = useState<Hotspot[]>(() =>
+    DEFAULT_HOTSPOTS.map((h) => ({ ...h }))
+  );
   const [layoutSource, setLayoutSource] = useState<'cloud' | 'local' | 'default' | 'loading'>(
     'loading'
   );
@@ -177,26 +180,29 @@ const SystemArchitecture: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      if (platformId === 'sys-star' && platformSubsystems.length && !starLayoutUserSaved()) {
-        const copied = await copyTarLayoutToPlatform(platformId, platformSubsystems);
-        if (cancelled) return;
-        if (copied.length) {
-          setHotspots(copied);
-          setLayoutSource('cloud');
-          setDirty(false);
-          setLoadedIds(copied.map((h) => h.id));
-          setActiveId(copied[0]?.id ?? null);
-          setSaveMessage(`Copied ${copied.length} TAR zones onto the S-TAR map.`);
-          return;
-        }
-      }
+      const tar = await copyTarLayoutToPlatform('sys-tar', DEFAULT_HOTSPOTS.map((h) => ({ id: h.id, name: h.label })));
+      if (!cancelled && tar.length) setTarHotspots(tar);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
       const result = await loadHotspotLayout(platformId, platformSubsystems);
       if (cancelled) return;
       setHotspots(result.hotspots);
       setLayoutSource(result.source);
       setDirty(false);
-      setLoadedIds([]);
-      setActiveId(null);
+      if (platformId === 'sys-star') {
+        const ids = platformSubsystems.map((s) => s.id);
+        setLoadedIds(ids);
+        setActiveId(ids[0] ?? null);
+        setSaveMessage('S-TAR zones are using TAR positions.');
+      } else {
+        setLoadedIds([]);
+        setActiveId(null);
+      }
     })();
     return () => {
       cancelled = true;
@@ -212,20 +218,23 @@ const SystemArchitecture: React.FC = () => {
       platformId
     );
     const defaultById = new Map(defaults.map((h) => [h.id, h]));
+    const tarByName = new Map(tarHotspots.map((h) => [String(h.label || '').trim().toLowerCase(), h]));
     return subsystems.map((s: any, i: number) => {
       const saved = byId.get(s.id) || byName.get(String(s.name || '').trim().toLowerCase());
+      const fromTar = platformId === 'sys-star' ? tarByName.get(String(s.name || '').trim().toLowerCase()) : undefined;
+      const src = fromTar || saved;
       const fallback = defaultById.get(s.id);
       return {
         id: s.id,
         label: s.name,
-        left: saved?.left ?? fallback?.left ?? 8 + (i % 3) * 22,
-        top: saved?.top ?? fallback?.top ?? 10 + Math.floor(i / 3) * 28,
-        width: saved?.width ?? fallback?.width ?? 18,
-        height: saved?.height ?? fallback?.height ?? 20,
-        color: saved?.color ?? fallback?.color ?? '#94a3b8',
+        left: src?.left ?? fallback?.left ?? 8 + (i % 3) * 22,
+        top: src?.top ?? fallback?.top ?? 10 + Math.floor(i / 3) * 28,
+        width: src?.width ?? fallback?.width ?? 18,
+        height: src?.height ?? fallback?.height ?? 20,
+        color: src?.color ?? fallback?.color ?? '#94a3b8',
       };
     });
-  }, [hotspots, subsystems, platformId]);
+  }, [hotspots, tarHotspots, subsystems, platformId]);
 
   /** Chips follow the active platform's subsystem order (same as the right-side list). */
   const orderedHotspots = useMemo(() => platformHotspots, [platformHotspots]);
@@ -335,24 +344,35 @@ const SystemArchitecture: React.FC = () => {
     setSaving(true);
     setSaveMessage(null);
     try {
-      const copied = await copyTarLayoutToPlatform(platformId, platformSubsystems);
-      if (!copied.length) {
-        setSaveMessage('Could not read TAR layout.');
-        return;
-      }
-      setHotspots(copied);
-      setDirty(false);
+      const tar = await copyTarLayoutToPlatform('sys-tar', DEFAULT_HOTSPOTS.map((h) => ({ id: h.id, name: h.label })));
+      if (tar.length) setTarHotspots(tar);
+      const source = tar.length ? tar : tarHotspots;
+      const byName = new Map(source.map((h) => [h.label.trim().toLowerCase(), h]));
+      const applied = platformSubsystems.map((s, i) => {
+        const hit = byName.get(s.name.trim().toLowerCase());
+        return {
+          id: s.id,
+          label: s.name,
+          left: hit?.left ?? 8 + (i % 3) * 22,
+          top: hit?.top ?? 10 + Math.floor(i / 3) * 28,
+          width: hit?.width ?? 18,
+          height: hit?.height ?? 20,
+          color: hit?.color ?? '#94a3b8',
+        };
+      });
+      setHotspots(applied);
+      setDirty(true);
       setLayoutSource('cloud');
-      setLoadedIds(copied.map((h) => h.id));
-      setActiveId(copied[0]?.id ?? null);
-      const sample = copied.slice(0, 3).map((h) => `${h.label} (${Math.round(h.left)},${Math.round(h.top)})`).join(' · ');
-      setSaveMessage(`Copied ${copied.length} TAR zones onto the map. ${sample}`);
+      setLoadedIds(applied.map((h) => h.id));
+      setActiveId(applied[0]?.id ?? null);
+      const sample = applied.slice(0, 3).map((h) => `${h.label} (${Math.round(h.left)},${Math.round(h.top)})`).join(' · ');
+      setSaveMessage(`Applied ${applied.length} TAR zones. ${sample}`);
     } catch {
       setSaveMessage('Copy from TAR failed.');
     } finally {
       setSaving(false);
     }
-  }, [platformId, platformSubsystems, activeSystem]);
+  }, [platformId, platformSubsystems, tarHotspots]);
 
   const sourceLabel =
     layoutSource === 'loading'
