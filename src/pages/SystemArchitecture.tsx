@@ -209,6 +209,13 @@ const SystemArchitecture: React.FC = () => {
     };
   }, [platformId, platformSubsystems]);
 
+  // Keep a live snapshot of whatever TAR is showing, so S-TAR can copy it exactly.
+  useEffect(() => {
+    if (platformId === 'sys-tar' && hotspots.length) {
+      setTarHotspots(hotspots.map((h) => ({ ...h })));
+    }
+  }, [platformId, hotspots]);
+
   /** Zones for the active platform — always one entry per subsystem (same list as the right side). */
   const platformHotspots = useMemo(() => {
     const byId = new Map(hotspots.map((h) => [h.id, h]));
@@ -344,9 +351,9 @@ const SystemArchitecture: React.FC = () => {
     setSaving(true);
     setSaveMessage(null);
     try {
+      const live = tarHotspots.length ? tarHotspots : DEFAULT_HOTSPOTS;
       const tar = await copyTarLayoutToPlatform('sys-tar', DEFAULT_HOTSPOTS.map((h) => ({ id: h.id, name: h.label })));
-      if (tar.length) setTarHotspots(tar);
-      const source = tar.length ? tar : tarHotspots;
+      const source = (tar.length ? tar : live);
       const byName = new Map(source.map((h) => [h.label.trim().toLowerCase(), h]));
       const applied = platformSubsystems.map((s, i) => {
         const hit = byName.get(s.name.trim().toLowerCase());
@@ -395,7 +402,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v3`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v4`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
