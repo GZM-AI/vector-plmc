@@ -304,12 +304,26 @@ export function remapTarLayoutToStar(
   }).filter(Boolean) as Hotspot[];
 }
 
+function readLegacyTarCache(defaults: Hotspot[]): Hotspot[] | null {
+  try {
+    const raw = localStorage.getItem('vector-tar-hotspots-v3');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Hotspot[];
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    return mergeWithDefaults(parsed, defaults);
+  } catch {
+    return null;
+  }
+}
+
 async function loadTarLayoutRaw(): Promise<Hotspot[] | null> {
   const tarDefaults = DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
   const cloud = await readFromCloud(getLayoutKey('sys-tar'), tarDefaults);
   if (cloud && cloud.length) return cloud;
   const local = readLocalCache('sys-tar', tarDefaults);
   if (local && local.length) return local;
+  const legacy = readLegacyTarCache(tarDefaults);
+  if (legacy && legacy.length) return legacy;
   return tarDefaults;
 }
 
@@ -323,7 +337,7 @@ export async function loadHotspotLayout(
   // S-TAR: one-time exact copy of TAR titles + positions (independent ids).
   // After that, S-TAR keeps its own saved layout.
   if (platformId === 'sys-star') {
-    const COPY_FLAG = 'vector-star-layout-copied-from-tar-v1';
+    const COPY_FLAG = 'vector-star-layout-copied-from-tar-v2';
     let alreadyCopied = false;
     try { alreadyCopied = localStorage.getItem(COPY_FLAG) === '1'; } catch { /* ignore */ }
 
