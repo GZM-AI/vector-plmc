@@ -1,14 +1,15 @@
 /**
- * Shared Hotspot Layout Store
- * ---------------------------
- * Team-wide TAR™ System Architecture zone map via Amplify Data MapLayout.
+ * Per-platform Hotspot Layout Store
+ * ---------------------------------
+ * Team-wide System Architecture zone maps via Amplify Data MapLayout.
+ * Each platform (TAR / S-TAR / M-TAR) has its own layoutKey and local cache.
  *
  * Model: MapLayout
- *   layoutKey: "tar-system-architecture-v1"
+ *   layoutKey: "tar-system-architecture-v1" | "star-system-architecture-v1" | "mtar-system-architecture-v1"
  *   hotspotsJson: JSON.stringify(Hotspot[])
  *   updatedBy?: string
  *
- * Load order: cloud → localStorage cache → DEFAULT_HOTSPOTS
+ * Load order: cloud → localStorage cache → platform defaults
  * Save: explicit "Save layout" only (draft while dragging)
  */
 
@@ -22,7 +23,23 @@ export type Hotspot = {
   color: string;
 };
 
-/** Bootstrap / Reset target */
+export type PlatformIdLike = string;
+
+const LAYOUT_KEYS: Record<string, string> = {
+  'sys-tar': 'tar-system-architecture-v1',
+  'sys-star': 'star-system-architecture-v1',
+  'sys-mtar': 'mtar-system-architecture-v1',
+};
+
+export function getLayoutKey(platformId: PlatformIdLike): string {
+  return LAYOUT_KEYS[platformId] || `layout-${platformId}-v1`;
+}
+
+function localCacheKey(platformId: PlatformIdLike): string {
+  return `vector-tar-hotspots-v3-${platformId}`;
+}
+
+/** Bootstrap / Reset target for TAR (original shared layout). */
 export const DEFAULT_HOTSPOTS: Hotspot[] = [
   { id: 'sub-scope', label: 'Scope', left: 40, top: 6, width: 12, height: 12, color: '#f43f5e' },
   { id: 'sub-optical', label: 'Sensor Integration', left: 38, top: 14, width: 14, height: 18, color: '#22c55e' },
@@ -38,37 +55,94 @@ export const DEFAULT_HOTSPOTS: Hotspot[] = [
   { id: 'sub-closed-loop', label: 'Closed Loop', left: 28, top: 34, width: 12, height: 22, color: '#6366f1' },
 ];
 
-const LOCAL_CACHE_KEY = 'vector-tar-hotspots-v3';
-export const LAYOUT_RECORD_KEY = 'tar-system-architecture-v1';
+const PALETTE = [
+  '#f43f5e',
+  '#22c55e',
+  '#0ea5e9',
+  '#f97316',
+  '#d946ef',
+  '#14b8a6',
+  '#ef4444',
+  '#a3e635',
+  '#06b6d4',
+  '#fbbf24',
+  '#f8fafc',
+  '#6366f1',
+];
 
-function mergeWithDefaults(partial: Partial<Hotspot>[]): Hotspot[] {
+/** Spread subsystems into a simple grid of default zones when no saved layout exists. */
+export function buildDefaultHotspots(
+  subsystems: { id: string; name: string }[],
+  platformId?: PlatformIdLike
+): Hotspot[] {
+  if (platformId === 'sys-tar' || !platformId) {
+    return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+  }
+  if (!subsystems.length) {
+    return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+  }
+  const cols = Math.min(4, Math.max(2, Math.ceil(Math.sqrt(subsystems.length))));
+  return subsystems.map((s, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    return {
+      id: s.id,
+      label: s.name,
+      left: 8 + col * 22,
+      top: 10 + row * 28,
+      width: 18,
+      height: 20,
+      color: PALETTE[i % PALETTE.length],
+    };
+  });
+}
+
+function mergeWithDefaults(partial: Partial<Hotspot>[], defaults: Hotspot[]): Hotspot[] {
   const byId = Object.fromEntries(
     partial.filter((h) => h && h.id).map((h) => [h.id as string, h])
   );
-  return DEFAULT_HOTSPOTS.map((d) => ({
+  // Prefer saved positions for known ids; append any new saved zones not in defaults
+  const merged = defaults.map((d) => ({
     ...d,
     left: byId[d.id]?.left ?? d.left,
     top: byId[d.id]?.top ?? d.top,
     width: byId[d.id]?.width ?? d.width,
     height: byId[d.id]?.height ?? d.height,
+    color: byId[d.id]?.color ?? d.color,
+    label: byId[d.id]?.label ?? d.label,
   }));
+  const known = new Set(defaults.map((d) => d.id));
+  for (const h of partial) {
+    if (h?.id && !known.has(h.id as string) && h.left != null) {
+      merged.push({
+        id: h.id as string,
+        label: (h.label as string) || (h.id as string),
+        left: h.left as number,
+        top: (h.top as number) ?? 10,
+        width: (h.width as number) ?? 16,
+        height: (h.height as number) ?? 16,
+        color: (h.color as string) || '#94a3b8',
+      });
+    }
+  }
+  return merged;
 }
 
-function readLocalCache(): Hotspot[] | null {
+function readLocalCache(platformId: PlatformIdLike, defaults: Hotspot[]): Hotspot[] | null {
   try {
-    const raw = localStorage.getItem(LOCAL_CACHE_KEY);
+    const raw = localStorage.getItem(localCacheKey(platformId));
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Hotspot[];
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    return mergeWithDefaults(parsed);
+    return mergeWithDefaults(parsed, defaults);
   } catch {
     return null;
   }
 }
 
-function writeLocalCache(hotspots: Hotspot[]): void {
+function writeLocalCache(platformId: PlatformIdLike, hotspots: Hotspot[]): void {
   try {
-    localStorage.setItem(LOCAL_CACHE_KEY, JSON.stringify(hotspots));
+    localStorage.setItem(localCacheKey(platformId), JSON.stringify(hotspots));
   } catch {
     /* ignore quota / private mode */
   }
@@ -108,16 +182,14 @@ function hasErrors(result: { errors?: unknown[] } | null | undefined): boolean {
   return Array.isArray(result?.errors) && result!.errors!.length > 0;
 }
 
-async function readFromCloud(): Promise<Hotspot[] | null> {
+async function readFromCloud(layoutKey: string, defaults: Hotspot[]): Promise<Hotspot[] | null> {
   if (!amplifyClient) {
     console.warn('[hotspotLayout] load: no client');
     return null;
   }
   try {
-    const result = await amplifyClient.models.MapLayout.get({
-      layoutKey: LAYOUT_RECORD_KEY,
-    });
-    console.log('[hotspotLayout] GET raw', result);
+    const result = await amplifyClient.models.MapLayout.get({ layoutKey });
+    console.log('[hotspotLayout] GET raw', layoutKey, result);
 
     if (hasErrors(result)) {
       console.error('[hotspotLayout] GET errors', result.errors);
@@ -126,41 +198,45 @@ async function readFromCloud(): Promise<Hotspot[] | null> {
 
     const json = result?.data?.hotspotsJson;
     if (!json) {
-      console.warn('[hotspotLayout] GET: no row / no hotspotsJson');
+      console.warn('[hotspotLayout] GET: no row / no hotspotsJson', layoutKey);
       return null;
     }
 
     const parsed = JSON.parse(json) as Hotspot[];
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
 
-    console.log('[hotspotLayout] load from CLOUD', parsed.length, 'zones');
-    return mergeWithDefaults(parsed);
+    console.log('[hotspotLayout] load from CLOUD', layoutKey, parsed.length, 'zones');
+    return mergeWithDefaults(parsed, defaults);
   } catch (err) {
-    console.error('[hotspotLayout] GET failed', err);
+    console.error('[hotspotLayout] GET failed', layoutKey, err);
     return null;
   }
 }
 
-async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<boolean> {
+async function writeToCloud(
+  layoutKey: string,
+  hotspots: Hotspot[],
+  updatedBy?: string
+): Promise<boolean> {
   if (!amplifyClient) {
     console.warn('[hotspotLayout] no Amplify client — configureHotspotAmplify was not called');
     return false;
   }
 
   const payload = {
-    layoutKey: LAYOUT_RECORD_KEY,
+    layoutKey,
     hotspotsJson: JSON.stringify(hotspots),
     updatedBy: updatedBy || 'unknown',
   };
 
   try {
     let result = await amplifyClient.models.MapLayout.update(payload);
-    console.log('[hotspotLayout] UPDATE raw', result);
+    console.log('[hotspotLayout] UPDATE raw', layoutKey, result);
 
     if (hasErrors(result) || !result?.data) {
-      console.warn('[hotspotLayout] UPDATE did not stick, trying CREATE');
+      console.warn('[hotspotLayout] UPDATE did not stick, trying CREATE', layoutKey);
       result = await amplifyClient.models.MapLayout.create(payload);
-      console.log('[hotspotLayout] CREATE raw', result);
+      console.log('[hotspotLayout] CREATE raw', layoutKey, result);
 
       if (hasErrors(result) || !result?.data) {
         console.error('[hotspotLayout] CREATE failed', result?.errors || result);
@@ -168,21 +244,18 @@ async function writeToCloud(hotspots: Hotspot[], updatedBy?: string): Promise<bo
       }
     }
 
-    // Verify the row is actually readable
-    const verify = await amplifyClient.models.MapLayout.get({
-      layoutKey: LAYOUT_RECORD_KEY,
-    });
-    console.log('[hotspotLayout] VERIFY GET', verify);
+    const verify = await amplifyClient.models.MapLayout.get({ layoutKey });
+    console.log('[hotspotLayout] VERIFY GET', layoutKey, verify);
 
     if (hasErrors(verify) || !verify?.data?.hotspotsJson) {
       console.error('[hotspotLayout] write reported ok but GET empty', verify?.errors || verify);
       return false;
     }
 
-    console.log('[hotspotLayout] cloud write verified');
+    console.log('[hotspotLayout] cloud write verified', layoutKey);
     return true;
   } catch (err) {
-    console.error('[hotspotLayout] cloud write failed', err);
+    console.error('[hotspotLayout] cloud write failed', layoutKey, err);
     return false;
   }
 }
@@ -192,47 +265,63 @@ export type LoadResult = {
   source: 'cloud' | 'local' | 'default';
 };
 
-/** Load team layout: cloud → local cache → defaults */
-export async function loadHotspotLayout(): Promise<LoadResult> {
-  const cloud = await readFromCloud();
+/**
+ * Load team layout for a platform: cloud → local cache → defaults.
+ * Pass the active platform's subsystem list so non-TAR platforms get sensible defaults.
+ */
+export async function loadHotspotLayout(
+  platformId: PlatformIdLike = 'sys-tar',
+  subsystems: { id: string; name: string }[] = []
+): Promise<LoadResult> {
+  const defaults = buildDefaultHotspots(subsystems, platformId);
+  const layoutKey = getLayoutKey(platformId);
+
+  const cloud = await readFromCloud(layoutKey, defaults);
   if (cloud) {
-    writeLocalCache(cloud);
-    console.log('[hotspotLayout] using source: cloud');
+    writeLocalCache(platformId, cloud);
+    console.log('[hotspotLayout] using source: cloud', platformId);
     return { hotspots: cloud, source: 'cloud' };
   }
 
-  const local = readLocalCache();
+  const local = readLocalCache(platformId, defaults);
   if (local) {
-    console.log('[hotspotLayout] using source: local');
+    console.log('[hotspotLayout] using source: local', platformId);
     return { hotspots: local, source: 'local' };
   }
 
-  console.log('[hotspotLayout] using source: default');
+  console.log('[hotspotLayout] using source: default', platformId);
   return {
-    hotspots: DEFAULT_HOTSPOTS.map((h) => ({ ...h })),
+    hotspots: defaults,
     source: 'default',
   };
 }
 
 /**
- * Publish designed layout.
+ * Publish designed layout for the given platform.
  * Always updates local cache; returns whether cloud write was verified.
  */
 export async function saveHotspotLayout(
+  platformId: PlatformIdLike,
   hotspots: Hotspot[],
   updatedBy?: string
 ): Promise<{ cloudSaved: boolean }> {
-  writeLocalCache(hotspots);
-  const cloudSaved = await writeToCloud(hotspots, updatedBy);
+  writeLocalCache(platformId, hotspots);
+  const cloudSaved = await writeToCloud(getLayoutKey(platformId), hotspots, updatedBy);
   return { cloudSaved };
 }
 
-/** Reset to code defaults and clear local cache (does not delete cloud row). */
-export function resetHotspotLayoutLocal(): Hotspot[] {
+/** Reset to platform defaults and clear local cache (does not delete cloud row). */
+export function resetHotspotLayoutLocal(
+  platformId: PlatformIdLike = 'sys-tar',
+  subsystems: { id: string; name: string }[] = []
+): Hotspot[] {
   try {
-    localStorage.removeItem(LOCAL_CACHE_KEY);
+    localStorage.removeItem(localCacheKey(platformId));
   } catch {
     /* ignore */
   }
-  return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+  return buildDefaultHotspots(subsystems, platformId);
 }
+
+// Back-compat export for any leftover references
+export const LAYOUT_RECORD_KEY = getLayoutKey('sys-tar');
