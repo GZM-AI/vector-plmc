@@ -333,12 +333,30 @@ export async function copyTarLayoutToPlatform(
   platformId: PlatformIdLike,
   subsystems: { id: string; name: string }[]
 ): Promise<Hotspot[]> {
-  const tar = await loadTarLayoutRaw();
-  if (!tar) return [];
-  const copied = remapTarLayoutToStar(tar, subsystems);
-  if (!copied.length) return [];
+  const tar = (await loadTarLayoutRaw()) || DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+  const byName = new Map(tar.map((h) => [h.label.trim().toLowerCase(), h]));
+  const byId = new Map(tar.map((h) => [h.id, h]));
+  const copied: Hotspot[] = subsystems.map((s, i) => {
+    const byLabel = byName.get(s.name.trim().toLowerCase());
+    const suffix = s.id.replace(/^star-/, '').replace(/^mtar-/, '');
+    const bySuffix = byId.get(suffix) || byId.get(s.id);
+    const src = byLabel || bySuffix;
+    if (src) {
+      return { ...src, id: s.id, label: s.name };
+    }
+    return {
+      id: s.id,
+      label: s.name,
+      left: 8 + (i % 3) * 22,
+      top: 10 + Math.floor(i / 3) * 28,
+      width: 18,
+      height: 20,
+      color: PALETTE[i % PALETTE.length],
+    };
+  });
   writeLocalCache(platformId, copied);
   await writeToCloud(getLayoutKey(platformId), copied, 'copied-from-tar');
+  console.log('[hotspotLayout] copy result', platformId, copied.map((h) => `${h.label}@${h.left},${h.top}`));
   return copied;
 }
 
