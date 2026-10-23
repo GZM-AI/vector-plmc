@@ -78,6 +78,16 @@ export function buildDefaultHotspots(
   if (platformId === 'sys-tar' || !platformId) {
     return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
   }
+  // S-TAR starts as a copy of TAR zone positions (independent ids). User adjusts from there.
+  if (platformId === 'sys-star') {
+    const byName = new Map(subsystems.map((s) => [s.name, s]));
+    const copied = DEFAULT_HOTSPOTS.map((h) => {
+      const match = byName.get(h.label) || subsystems.find((s) => s.id.endsWith(h.id));
+      if (!match) return null;
+      return { ...h, id: match.id, label: match.name };
+    }).filter(Boolean) as Hotspot[];
+    if (copied.length) return copied;
+  }
   if (!subsystems.length) {
     return DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
   }
