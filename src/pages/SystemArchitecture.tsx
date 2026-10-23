@@ -184,15 +184,27 @@ const SystemArchitecture: React.FC = () => {
     };
   }, [platformId, platformSubsystems]);
 
+  /** Only zones that belong to the active platform's subsystems. */
+  const platformHotspots = useMemo(() => {
+    const ids = new Set(subsystems.map((s: any) => s.id));
+    const matched = hotspots.filter((h) => ids.has(h.id));
+    if (matched.length > 0) return matched;
+    // Fallback: generate defaults for this platform so TAR zones never appear on S-TAR / M-TAR
+    return buildDefaultHotspots(
+      subsystems.map((s: any) => ({ id: s.id, name: s.name })),
+      platformId
+    );
+  }, [hotspots, subsystems, platformId]);
+
   /** Chips follow Registry / right-menu subsystem order, not raw hotspot layout order. */
   const orderedHotspots = useMemo(() => {
     const rank = new Map(subsystems.map((s: any, i: number) => [s.id, i]));
-    return [...hotspots].sort((a, b) => {
+    return [...platformHotspots].sort((a, b) => {
       const ia = rank.has(a.id) ? (rank.get(a.id) as number) : 1000;
       const ib = rank.has(b.id) ? (rank.get(b.id) as number) : 1000;
       return ia - ib;
     });
-  }, [hotspots, subsystems]);
+  }, [platformHotspots, subsystems]);
 
   const active = useMemo(() => {
     if (!activeId) return null;
@@ -206,9 +218,9 @@ const SystemArchitecture: React.FC = () => {
   const loadedSet = useMemo(() => new Set(loadedIds), [loadedIds]);
 
   const visibleHotspots = useMemo(() => {
-    if (editMode) return hotspots;
-    return hotspots.filter((h) => loadedSet.has(h.id));
-  }, [editMode, hotspots, loadedSet]);
+    if (editMode) return platformHotspots;
+    return platformHotspots.filter((h) => loadedSet.has(h.id));
+  }, [editMode, platformHotspots, loadedSet]);
 
   const beginMove = (e: React.MouseEvent, h: Hotspot) => {
     e.preventDefault();
@@ -260,7 +272,7 @@ const SystemArchitecture: React.FC = () => {
     });
   };
 
-  const showAllZones = () => setLoadedIds(hotspots.map((h) => h.id));
+  const showAllZones = () => setLoadedIds(platformHotspots.map((h) => h.id));
 
   const hideAllZones = () => {
     setLoadedIds([]);
@@ -279,7 +291,7 @@ const SystemArchitecture: React.FC = () => {
     setSaving(true);
     setSaveMessage(null);
     try {
-      const { cloudSaved } = await saveHotspotLayout(platformId, hotspots);
+      const { cloudSaved } = await saveHotspotLayout(platformId, platformHotspots);
       setDirty(false);
       setLayoutSource(cloudSaved ? 'cloud' : 'local');
       setSaveMessage(
@@ -292,7 +304,7 @@ const SystemArchitecture: React.FC = () => {
     } finally {
       setSaving(false);
     }
-  }, [hotspots, platformId]);
+  }, [platformHotspots, platformId]);
 
   const sourceLabel =
     layoutSource === 'loading'
