@@ -350,61 +350,6 @@ const SystemArchitecture: React.FC = () => {
     }
   }, [platformHotspots, platformId]);
 
-  const copyFromTar = useCallback(async () => {
-    if (platformId === 'sys-tar') return;
-    setSaving(true);
-    setSaveMessage(null);
-    try {
-      const tarNode = findInTree(productTree, 'sys-tar');
-      const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
-      const starSubs = platformSubsystems;
-      if (!tarSubs.length || !starSubs.length) {
-        setSaveMessage('No TAR subsystems found to copy.');
-        return;
-      }
-      const tarPos = new Map(tarHotspots.map((h) => [h.id, h]));
-      const applied: Hotspot[] = starSubs.map((s, i) => {
-        const tar = tarSubs[i];
-        const pos = tar ? tarPos.get(tar.id) : undefined;
-        if (tar && tar.name && tar.name !== s.name) {
-          updateEntityFields(s.id, { name: tar.name, modifiedBy: 'TAR copy' });
-        }
-        return {
-          id: s.id,
-          label: tar?.name || s.name,
-          left: pos?.left ?? 8 + (i % 3) * 22,
-          top: pos?.top ?? 10 + Math.floor(i / 3) * 28,
-          width: pos?.width ?? 18,
-          height: pos?.height ?? 20,
-          color: pos?.color ?? '#94a3b8',
-        };
-      });
-      setHotspots(applied);
-      setTarHotspots(tarSubs.map((t: any, i: number) => {
-        const pos = tarPos.get(t.id);
-        return {
-          id: t.id,
-          label: t.name,
-          left: pos?.left ?? 8,
-          top: pos?.top ?? 8,
-          width: pos?.width ?? 16,
-          height: pos?.height ?? 16,
-          color: pos?.color ?? '#94a3b8',
-        };
-      }));
-      setDirty(true);
-      setLayoutSource('local');
-      setLoadedIds(applied.map((h) => h.id));
-      setActiveId(applied[0]?.id ?? null);
-      const titles = applied.slice(0, 5).map((h) => h.label).join(', ');
-      setSaveMessage(`Copied ${applied.length} TAR zones: ${titles}`);
-    } catch {
-      setSaveMessage('Copy from TAR failed.');
-    } finally {
-      setSaving(false);
-    }
-  }, [platformId, platformSubsystems, productTree, tarHotspots]);
-
   const sourceLabel =
     layoutSource === 'loading'
       ? 'Loading layout…'
@@ -431,21 +376,7 @@ const SystemArchitecture: React.FC = () => {
           <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-3">
-          <button
-            type="button"
-            onClick={copyFromTar}
-            disabled={saving || platformId === 'sys-tar'}
-            title={platformId === 'sys-tar' ? 'Switch to S-TAR or M-TAR first' : 'Copy TAR zone titles and positions'}
-            className={
-              'px-4 py-2 rounded-xl text-sm border font-medium ' +
-              (platformId === 'sys-tar'
-                ? 'bg-zinc-900 border-zinc-800 text-zinc-600 cursor-not-allowed'
-                : 'bg-blue-600 border-blue-500 text-white')
-            }
-          >
-            Copy TAR zones
-          </button>
-          <button
+<button
             type="button"
             onClick={() => setEditMode((v) => !v)}
             className={
