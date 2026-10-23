@@ -116,9 +116,8 @@ const SystemArchitecture: React.FC = () => {
       if (rect.width < 1 || rect.height < 1) return;
       const dx = ((e.clientX - drag.startX) / rect.width) * 100;
       const dy = ((e.clientY - drag.startY) / rect.height) * 100;
-      setHotspots((prev) =>
-        prev.map((h) => {
-          if (h.id !== drag.id) return h;
+      setHotspots((prev) => {
+        const nextGeom = (h: Hotspot): Hotspot => {
           if (drag.mode === 'move') {
             return {
               ...h,
@@ -131,8 +130,13 @@ const SystemArchitecture: React.FC = () => {
             width: Math.max(6, Math.min(100 - drag.origLeft, drag.origWidth + dx)),
             height: Math.max(6, Math.min(100 - drag.origTop, drag.origHeight + dy)),
           };
-        })
-      );
+        };
+        const idx = prev.findIndex((h) => h.id === drag.id);
+        if (idx === -1) {
+          return [...prev, nextGeom({ id: drag.id, label: drag.id, left: drag.origLeft, top: drag.origTop, width: drag.origWidth, height: drag.origHeight, color: '#94a3b8' })];
+        }
+        return prev.map((h) => (h.id === drag.id ? nextGeom(h) : h));
+      });
       setDirty(true);
     };
     const onMouseUp = () => {
@@ -184,27 +188,31 @@ const SystemArchitecture: React.FC = () => {
     };
   }, [platformId, platformSubsystems]);
 
-  /** Only zones that belong to the active platform's subsystems. */
+  /** Zones for the active platform — always one entry per subsystem (same list as the right side). */
   const platformHotspots = useMemo(() => {
-    const ids = new Set(subsystems.map((s: any) => s.id));
-    const matched = hotspots.filter((h) => ids.has(h.id));
-    if (matched.length > 0) return matched;
-    // Fallback: generate defaults for this platform so TAR zones never appear on S-TAR / M-TAR
-    return buildDefaultHotspots(
+    const byId = new Map(hotspots.map((h) => [h.id, h]));
+    const defaults = buildDefaultHotspots(
       subsystems.map((s: any) => ({ id: s.id, name: s.name })),
       platformId
     );
+    const defaultById = new Map(defaults.map((h) => [h.id, h]));
+    return subsystems.map((s: any, i: number) => {
+      const saved = byId.get(s.id);
+      const fallback = defaultById.get(s.id);
+      return {
+        id: s.id,
+        label: s.name,
+        left: saved?.left ?? fallback?.left ?? 8 + (i % 3) * 22,
+        top: saved?.top ?? fallback?.top ?? 10 + Math.floor(i / 3) * 28,
+        width: saved?.width ?? fallback?.width ?? 18,
+        height: saved?.height ?? fallback?.height ?? 20,
+        color: saved?.color ?? fallback?.color ?? '#94a3b8',
+      };
+    });
   }, [hotspots, subsystems, platformId]);
 
-  /** Chips follow Registry / right-menu subsystem order, not raw hotspot layout order. */
-  const orderedHotspots = useMemo(() => {
-    const rank = new Map(subsystems.map((s: any, i: number) => [s.id, i]));
-    return [...platformHotspots].sort((a, b) => {
-      const ia = rank.has(a.id) ? (rank.get(a.id) as number) : 1000;
-      const ib = rank.has(b.id) ? (rank.get(b.id) as number) : 1000;
-      return ia - ib;
-    });
-  }, [platformHotspots, subsystems]);
+  /** Chips follow the active platform's subsystem order (same as the right-side list). */
+  const orderedHotspots = useMemo(() => platformHotspots, [platformHotspots]);
 
   const active = useMemo(() => {
     if (!activeId) return null;
@@ -605,7 +613,7 @@ const SystemArchitecture: React.FC = () => {
               <p className="text-zinc-400 text-sm mb-6">Select a region or subsystem name.</p>
               <div className="grid grid-cols-1 gap-2 text-left">
                 {subsystems.map((s: any) => {
-                  const hs = hotspots.find((h) => h.id === s.id);
+                  const hs = platformHotspots.find((h) => h.id === s.id);
                   return (
                     <button
                       key={s.id}
