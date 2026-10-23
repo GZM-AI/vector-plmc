@@ -206,13 +206,14 @@ const SystemArchitecture: React.FC = () => {
   /** Zones for the active platform — always one entry per subsystem (same list as the right side). */
   const platformHotspots = useMemo(() => {
     const byId = new Map(hotspots.map((h) => [h.id, h]));
+    const byName = new Map(hotspots.map((h) => [String(h.label || '').trim().toLowerCase(), h]));
     const defaults = buildDefaultHotspots(
       subsystems.map((s: any) => ({ id: s.id, name: s.name })),
       platformId
     );
     const defaultById = new Map(defaults.map((h) => [h.id, h]));
     return subsystems.map((s: any, i: number) => {
-      const saved = byId.get(s.id);
+      const saved = byId.get(s.id) || byName.get(String(s.name || '').trim().toLowerCase());
       const fallback = defaultById.get(s.id);
       return {
         id: s.id,
@@ -342,7 +343,8 @@ const SystemArchitecture: React.FC = () => {
       setHotspots(copied);
       setDirty(false);
       setLayoutSource('cloud');
-      setSaveMessage(`Copied ${copied.length} TAR zones onto ${activeSystem?.name || 'this platform'}.`);
+      const sample = copied.slice(0, 3).map((h) => `${h.label} (${Math.round(h.left)},${Math.round(h.top)})`).join(' · ');
+      setSaveMessage(`Copied ${copied.length} TAR zones. ${sample}`);
     } catch {
       setSaveMessage('Copy from TAR failed.');
     } finally {
