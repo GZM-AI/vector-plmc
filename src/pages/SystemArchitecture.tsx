@@ -6,6 +6,7 @@ import {
   getRegistryTree,
   getMergedAllEntities,
   subscribeConfigStore,
+  updateEntityFields,
 } from '../lib/configStore';
 import { PlatformSelector } from '../components/PlatformSelector';
 import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
@@ -225,15 +226,18 @@ const SystemArchitecture: React.FC = () => {
       platformId
     );
     const defaultById = new Map(defaults.map((h) => [h.id, h]));
-    const tarByName = new Map(tarHotspots.map((h) => [String(h.label || '').trim().toLowerCase(), h]));
+    const tarNode = findInTree(productTree, 'sys-tar');
+    const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
+    const tarPos = new Map(tarHotspots.map((h) => [h.id, h]));
     return subsystems.map((s: any, i: number) => {
       const saved = byId.get(s.id) || byName.get(String(s.name || '').trim().toLowerCase());
-      const fromTar = platformId === 'sys-star' ? tarByName.get(String(s.name || '').trim().toLowerCase()) : undefined;
+      const tar = platformId === 'sys-star' ? tarSubs[i] : undefined;
+      const fromTar = tar ? tarPos.get(tar.id) : undefined;
       const src = fromTar || saved;
       const fallback = defaultById.get(s.id);
       return {
         id: s.id,
-        label: s.name,
+        label: tar?.name || s.name,
         left: src?.left ?? fallback?.left ?? 8 + (i % 3) * 22,
         top: src?.top ?? fallback?.top ?? 10 + Math.floor(i / 3) * 28,
         width: src?.width ?? fallback?.width ?? 18,
@@ -241,7 +245,7 @@ const SystemArchitecture: React.FC = () => {
         color: src?.color ?? fallback?.color ?? '#94a3b8',
       };
     });
-  }, [hotspots, tarHotspots, subsystems, platformId]);
+  }, [hotspots, tarHotspots, subsystems, platformId, productTree]);
 
   /** Chips follow the active platform's subsystem order (same as the right-side list). */
   const orderedHotspots = useMemo(() => platformHotspots, [platformHotspots]);
@@ -351,35 +355,55 @@ const SystemArchitecture: React.FC = () => {
     setSaving(true);
     setSaveMessage(null);
     try {
-      const live = tarHotspots.length ? tarHotspots : DEFAULT_HOTSPOTS;
-      const tar = await copyTarLayoutToPlatform('sys-tar', DEFAULT_HOTSPOTS.map((h) => ({ id: h.id, name: h.label })));
-      const source = (tar.length ? tar : live);
-      const byName = new Map(source.map((h) => [h.label.trim().toLowerCase(), h]));
-      const applied = platformSubsystems.map((s, i) => {
-        const hit = byName.get(s.name.trim().toLowerCase());
+      const tarNode = findInTree(productTree, 'sys-tar');
+      const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
+      const starSubs = platformSubsystems;
+      if (!tarSubs.length || !starSubs.length) {
+        setSaveMessage('No TAR subsystems found to copy.');
+        return;
+      }
+      const tarPos = new Map(tarHotspots.map((h) => [h.id, h]));
+      const applied: Hotspot[] = starSubs.map((s, i) => {
+        const tar = tarSubs[i];
+        const pos = tar ? tarPos.get(tar.id) : undefined;
+        if (tar && tar.name && tar.name !== s.name) {
+          updateEntityFields(s.id, { name: tar.name, modifiedBy: 'TAR copy' });
+        }
         return {
           id: s.id,
-          label: s.name,
-          left: hit?.left ?? 8 + (i % 3) * 22,
-          top: hit?.top ?? 10 + Math.floor(i / 3) * 28,
-          width: hit?.width ?? 18,
-          height: hit?.height ?? 20,
-          color: hit?.color ?? '#94a3b8',
+          label: tar?.name || s.name,
+          left: pos?.left ?? 8 + (i % 3) * 22,
+          top: pos?.top ?? 10 + Math.floor(i / 3) * 28,
+          width: pos?.width ?? 18,
+          height: pos?.height ?? 20,
+          color: pos?.color ?? '#94a3b8',
         };
       });
       setHotspots(applied);
+      setTarHotspots(tarSubs.map((t: any, i: number) => {
+        const pos = tarPos.get(t.id);
+        return {
+          id: t.id,
+          label: t.name,
+          left: pos?.left ?? 8,
+          top: pos?.top ?? 8,
+          width: pos?.width ?? 16,
+          height: pos?.height ?? 16,
+          color: pos?.color ?? '#94a3b8',
+        };
+      }));
       setDirty(true);
-      setLayoutSource('cloud');
+      setLayoutSource('local');
       setLoadedIds(applied.map((h) => h.id));
       setActiveId(applied[0]?.id ?? null);
-      const sample = applied.slice(0, 3).map((h) => `${h.label} (${Math.round(h.left)},${Math.round(h.top)})`).join(' · ');
-      setSaveMessage(`Applied ${applied.length} TAR zones. ${sample}`);
+      const titles = applied.slice(0, 5).map((h) => h.label).join(', ');
+      setSaveMessage(`Copied ${applied.length} TAR zones: ${titles}`);
     } catch {
       setSaveMessage('Copy from TAR failed.');
     } finally {
       setSaving(false);
     }
-  }, [platformId, platformSubsystems, tarHotspots]);
+  }, [platformId, platformSubsystems, productTree, tarHotspots]);
 
   const sourceLabel =
     layoutSource === 'loading'
@@ -402,7 +426,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v4`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v5`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
@@ -544,7 +568,7 @@ const SystemArchitecture: React.FC = () => {
                   }}
                 >
                   <div className="m-1 mb-0.5 text-[10px] sm:text-[11px] font-semibold leading-tight bg-black/80 text-white px-1.5 py-0.5 rounded pointer-events-none self-start max-w-[95%] truncate">
-                    {labelFor(h.id, h.label)}
+                    {h.label || labelFor(h.id)}
                   </div>
                   {components.length > 0 && (
                     <ul className="px-1.5 pb-1 pt-0.5 space-y-px overflow-hidden pointer-events-none flex-1 min-h-0">
@@ -608,7 +632,7 @@ const SystemArchitecture: React.FC = () => {
                       : { borderColor: h.color, color: h.color, backgroundColor: 'transparent' }
                   }
                 >
-                  <span className="truncate max-w-[11rem]">{labelFor(h.id, h.label)}</span>
+                  <span className="truncate max-w-[11rem]">{h.label || labelFor(h.id)}</span>
                   {onMap && (
                     <span
                       className="inline-flex w-3.5 h-3.5 items-center justify-center rounded-full bg-black/40 text-white text-[10px]"
