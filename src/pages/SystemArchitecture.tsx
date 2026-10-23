@@ -16,6 +16,8 @@ import {
   saveHotspotLayout,
   resetHotspotLayoutLocal,
   buildDefaultHotspots,
+  copyTarLayoutToPlatform,
+  starLayoutUserSaved,
 } from '../lib/hotspotLayoutStore';
 
 function findInTree(node: any, id: string): any | null {
@@ -175,6 +177,19 @@ const SystemArchitecture: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      if (platformId === 'sys-star' && platformSubsystems.length && !starLayoutUserSaved()) {
+        const copied = await copyTarLayoutToPlatform(platformId, platformSubsystems);
+        if (cancelled) return;
+        if (copied.length) {
+          setHotspots(copied);
+          setLayoutSource('cloud');
+          setDirty(false);
+          setLoadedIds([]);
+          setActiveId(null);
+          setSaveMessage(`Copied ${copied.length} TAR zones onto S-TAR.`);
+          return;
+        }
+      }
       const result = await loadHotspotLayout(platformId, platformSubsystems);
       if (cancelled) return;
       setHotspots(result.hotspots);
@@ -314,6 +329,27 @@ const SystemArchitecture: React.FC = () => {
     }
   }, [platformHotspots, platformId]);
 
+  const copyFromTar = useCallback(async () => {
+    if (platformId === 'sys-tar') return;
+    setSaving(true);
+    setSaveMessage(null);
+    try {
+      const copied = await copyTarLayoutToPlatform(platformId, platformSubsystems);
+      if (!copied.length) {
+        setSaveMessage('Could not read TAR layout.');
+        return;
+      }
+      setHotspots(copied);
+      setDirty(false);
+      setLayoutSource('cloud');
+      setSaveMessage(`Copied ${copied.length} TAR zones onto ${activeSystem?.name || 'this platform'}.`);
+    } catch {
+      setSaveMessage('Copy from TAR failed.');
+    } finally {
+      setSaving(false);
+    }
+  }, [platformId, platformSubsystems, activeSystem]);
+
   const sourceLabel =
     layoutSource === 'loading'
       ? 'Loading layout…'
@@ -340,6 +376,16 @@ const SystemArchitecture: React.FC = () => {
           <PlatformSelector className="mt-3" />
         </div>
         <div className="flex flex-wrap gap-3">
+          {platformId !== 'sys-tar' && (
+            <button
+              type="button"
+              onClick={copyFromTar}
+              disabled={saving}
+              className="px-4 py-2 rounded-xl text-sm border bg-zinc-900 border-zinc-700 text-zinc-300 font-medium"
+            >
+              Copy TAR zones
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setEditMode((v) => !v)}
