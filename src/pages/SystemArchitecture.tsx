@@ -184,9 +184,9 @@ const SystemArchitecture: React.FC = () => {
           setHotspots(copied);
           setLayoutSource('cloud');
           setDirty(false);
-          setLoadedIds([]);
-          setActiveId(null);
-          setSaveMessage(`Copied ${copied.length} TAR zones onto S-TAR.`);
+          setLoadedIds(copied.map((h) => h.id));
+          setActiveId(copied[0]?.id ?? null);
+          setSaveMessage(`Copied ${copied.length} TAR zones onto the S-TAR map.`);
           return;
         }
       }
@@ -343,8 +343,10 @@ const SystemArchitecture: React.FC = () => {
       setHotspots(copied);
       setDirty(false);
       setLayoutSource('cloud');
+      setLoadedIds(copied.map((h) => h.id));
+      setActiveId(copied[0]?.id ?? null);
       const sample = copied.slice(0, 3).map((h) => `${h.label} (${Math.round(h.left)},${Math.round(h.top)})`).join(' · ');
-      setSaveMessage(`Copied ${copied.length} TAR zones. ${sample}`);
+      setSaveMessage(`Copied ${copied.length} TAR zones onto the map. ${sample}`);
     } catch {
       setSaveMessage('Copy from TAR failed.');
     } finally {
