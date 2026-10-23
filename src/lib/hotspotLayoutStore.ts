@@ -269,6 +269,12 @@ export type LoadResult = {
  * Load team layout for a platform: cloud → local cache → defaults.
  * Pass the active platform's subsystem list so non-TAR platforms get sensible defaults.
  */
+function hasPlatformOverlap(hotspots: Hotspot[], subsystems: { id: string }[]): boolean {
+  if (!subsystems.length) return true;
+  const ids = new Set(subsystems.map((s) => s.id));
+  return hotspots.some((h) => ids.has(h.id));
+}
+
 export async function loadHotspotLayout(
   platformId: PlatformIdLike = 'sys-tar',
   subsystems: { id: string; name: string }[] = []
@@ -277,14 +283,14 @@ export async function loadHotspotLayout(
   const layoutKey = getLayoutKey(platformId);
 
   const cloud = await readFromCloud(layoutKey, defaults);
-  if (cloud) {
+  if (cloud && hasPlatformOverlap(cloud, subsystems)) {
     writeLocalCache(platformId, cloud);
     console.log('[hotspotLayout] using source: cloud', platformId);
     return { hotspots: cloud, source: 'cloud' };
   }
 
   const local = readLocalCache(platformId, defaults);
-  if (local) {
+  if (local && hasPlatformOverlap(local, subsystems)) {
     console.log('[hotspotLayout] using source: local', platformId);
     return { hotspots: local, source: 'local' };
   }
