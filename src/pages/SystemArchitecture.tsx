@@ -233,7 +233,8 @@ const SystemArchitecture: React.FC = () => {
       const saved = byId.get(s.id) || byName.get(String(s.name || '').trim().toLowerCase());
       const tar = platformId === 'sys-star' ? tarSubs[i] : undefined;
       const fromTar = tar ? tarPos.get(tar.id) : undefined;
-      const src = fromTar || saved;
+      // Saved S-TAR positions win so Edit zones can move them. TAR is only the fallback.
+      const src = saved || fromTar;
       const fallback = defaultById.get(s.id);
       return {
         id: s.id,
@@ -371,7 +372,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v5`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v6`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
