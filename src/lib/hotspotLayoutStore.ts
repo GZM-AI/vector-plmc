@@ -327,6 +327,21 @@ async function loadTarLayoutRaw(): Promise<Hotspot[] | null> {
   return tarDefaults;
 }
 
+
+/** Always read TAR's current layout and remap it onto another platform's subsystems. */
+export async function copyTarLayoutToPlatform(
+  platformId: PlatformIdLike,
+  subsystems: { id: string; name: string }[]
+): Promise<Hotspot[]> {
+  const tar = await loadTarLayoutRaw();
+  if (!tar) return [];
+  const copied = remapTarLayoutToStar(tar, subsystems);
+  if (!copied.length) return [];
+  writeLocalCache(platformId, copied);
+  await writeToCloud(getLayoutKey(platformId), copied, 'copied-from-tar');
+  return copied;
+}
+
 export async function loadHotspotLayout(
   platformId: PlatformIdLike = 'sys-tar',
   subsystems: { id: string; name: string }[] = []
@@ -334,35 +349,18 @@ export async function loadHotspotLayout(
   const defaults = buildDefaultHotspots(subsystems, platformId);
   const layoutKey = getLayoutKey(platformId);
 
-  // S-TAR: one-time exact copy of TAR titles + positions (independent ids).
-  // After that, S-TAR keeps its own saved layout.
+  // S-TAR: one-time copy of TAR titles + positions. Button can force it again.
   if (platformId === 'sys-star') {
-    const COPY_FLAG = 'vector-star-layout-copied-from-tar-v2';
+    const COPY_FLAG = 'vector-star-layout-copied-from-tar-v3';
     let alreadyCopied = false;
     try { alreadyCopied = localStorage.getItem(COPY_FLAG) === '1'; } catch { /* ignore */ }
-
     if (!alreadyCopied) {
-      const tar = await loadTarLayoutRaw();
-      if (tar) {
-        const copied = remapTarLayoutToStar(tar, subsystems);
-        if (copied.length) {
-          writeLocalCache(platformId, copied);
-          await writeToCloud(layoutKey, copied, 'copied-from-tar');
-          try { localStorage.setItem(COPY_FLAG, '1'); } catch { /* ignore */ }
-          console.log('[hotspotLayout] copied TAR layout to S-TAR', copied.length);
-          return { hotspots: copied, source: 'cloud' };
-        }
+      const copied = await copyTarLayoutToPlatform(platformId, subsystems);
+      if (copied.length) {
+        try { localStorage.setItem(COPY_FLAG, '1'); } catch { /* ignore */ }
+        console.log('[hotspotLayout] S-TAR copied from TAR', copied.length);
+        return { hotspots: copied, source: 'cloud' };
       }
-    }
-
-    const existingCloud = await readFromCloud(layoutKey, defaults);
-    if (existingCloud && hasPlatformOverlap(existingCloud, subsystems)) {
-      writeLocalCache(platformId, existingCloud);
-      return { hotspots: existingCloud, source: 'cloud' };
-    }
-    const existingLocal = readLocalCache(platformId, defaults);
-    if (existingLocal && hasPlatformOverlap(existingLocal, subsystems)) {
-      return { hotspots: existingLocal, source: 'local' };
     }
   }
 
@@ -397,7 +395,14 @@ export async function saveHotspotLayout(
 ): Promise<{ cloudSaved: boolean }> {
   writeLocalCache(platformId, hotspots);
   const cloudSaved = await writeToCloud(getLayoutKey(platformId), hotspots, updatedBy);
+  if (platformId === 'sys-star') {
+    try { localStorage.setItem('vector-star-layout-user-saved', '1'); } catch { /* ignore */ }
+  }
   return { cloudSaved };
+}
+
+export function starLayoutUserSaved(): boolean {
+  try { return localStorage.getItem('vector-star-layout-user-saved') === '1'; } catch { return false; }
 }
 
 /** Reset to platform defaults and clear local cache (does not delete cloud row). */
