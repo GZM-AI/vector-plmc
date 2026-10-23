@@ -285,12 +285,72 @@ function hasPlatformOverlap(hotspots: Hotspot[], subsystems: { id: string }[]): 
   return hotspots.some((h) => ids.has(h.id));
 }
 
+
+/** Remap TAR zone ids/titles onto S-TAR subsystem ids, keeping exact positions. */
+export function remapTarLayoutToStar(
+  tarHotspots: Hotspot[],
+  starSubsystems: { id: string; name: string }[]
+): Hotspot[] {
+  const byName = new Map(starSubsystems.map((s) => [s.name, s]));
+  const bySuffix = new Map(starSubsystems.map((s) => [s.id.replace(/^star-/, ''), s]));
+  return tarHotspots.map((h) => {
+    const match = byName.get(h.label) || bySuffix.get(h.id);
+    if (!match) return null;
+    return {
+      ...h,
+      id: match.id,
+      label: match.name || h.label,
+    };
+  }).filter(Boolean) as Hotspot[];
+}
+
+async function loadTarLayoutRaw(): Promise<Hotspot[] | null> {
+  const tarDefaults = DEFAULT_HOTSPOTS.map((h) => ({ ...h }));
+  const cloud = await readFromCloud(getLayoutKey('sys-tar'), tarDefaults);
+  if (cloud && cloud.length) return cloud;
+  const local = readLocalCache('sys-tar', tarDefaults);
+  if (local && local.length) return local;
+  return tarDefaults;
+}
+
 export async function loadHotspotLayout(
   platformId: PlatformIdLike = 'sys-tar',
   subsystems: { id: string; name: string }[] = []
 ): Promise<LoadResult> {
   const defaults = buildDefaultHotspots(subsystems, platformId);
   const layoutKey = getLayoutKey(platformId);
+
+  // S-TAR: one-time exact copy of TAR titles + positions (independent ids).
+  // After that, S-TAR keeps its own saved layout.
+  if (platformId === 'sys-star') {
+    const COPY_FLAG = 'vector-star-layout-copied-from-tar-v1';
+    let alreadyCopied = false;
+    try { alreadyCopied = localStorage.getItem(COPY_FLAG) === '1'; } catch { /* ignore */ }
+
+    if (!alreadyCopied) {
+      const tar = await loadTarLayoutRaw();
+      if (tar) {
+        const copied = remapTarLayoutToStar(tar, subsystems);
+        if (copied.length) {
+          writeLocalCache(platformId, copied);
+          await writeToCloud(layoutKey, copied, 'copied-from-tar');
+          try { localStorage.setItem(COPY_FLAG, '1'); } catch { /* ignore */ }
+          console.log('[hotspotLayout] copied TAR layout to S-TAR', copied.length);
+          return { hotspots: copied, source: 'cloud' };
+        }
+      }
+    }
+
+    const existingCloud = await readFromCloud(layoutKey, defaults);
+    if (existingCloud && hasPlatformOverlap(existingCloud, subsystems)) {
+      writeLocalCache(platformId, existingCloud);
+      return { hotspots: existingCloud, source: 'cloud' };
+    }
+    const existingLocal = readLocalCache(platformId, defaults);
+    if (existingLocal && hasPlatformOverlap(existingLocal, subsystems)) {
+      return { hotspots: existingLocal, source: 'local' };
+    }
+  }
 
   const cloud = await readFromCloud(layoutKey, defaults);
   if (cloud && hasPlatformOverlap(cloud, subsystems)) {
