@@ -95,6 +95,25 @@ function coreElements(
   });
 }
 
+
+/** Deep-clone a subsystem tree and rewrite every id / parentId with a platform prefix. Independent copy. */
+function cloneForPlatform(node: ResourceEntity, prefix: string, newParentId: string): ResourceEntity {
+  const rewrite = (id: string) => (id.startsWith(prefix) ? id : `${prefix}${id}`);
+  const walk = (n: ResourceEntity, parentId: string): ResourceEntity => {
+    const newId = rewrite(n.id);
+    const kids = n.children || [];
+    const children = kids.map((c) => walk(c, newId));
+    return {
+      ...n,
+      id: newId,
+      parentId,
+      attachmentIds: [],
+      children: children.length ? children : undefined,
+    };
+  };
+  return walk(node, newParentId);
+}
+
 function withParent(parentId: string, nodes: ResourceEntity[]): ResourceEntity[] {
   return nodes.map((n) => ({
     ...n,
@@ -530,7 +549,7 @@ export const TAR_SYSTEM: ResourceEntity = e({
   ],
 });
 
-/** S-TAR — single-shot sniper with Dragonhunter + articulated barrel. Placeholder subsystems; expand later. */
+/** S-TAR — same subsystem set as TAR, independent copies (edit freely). */
 export const STAR_SYSTEM: ResourceEntity = e({
   id: 'sys-star',
   name: 'S-TAR',
@@ -542,47 +561,20 @@ export const STAR_SYSTEM: ResourceEntity = e({
   status: 'Draft',
   revision: 'A',
   lifecycleStage: 'concept',
-  children: withParent('sys-star', [
-    e({
-      id: 'sub-star-dragonhunter',
-      name: 'Dragonhunter Integration',
-      type: 'Subsystem',
-      description: 'Integration of the Dragonhunter system for S-TAR.',
-      parentId: 'sys-star',
-      tags: ['dragonhunter'],
-      children: [
-        coreElements('sub-star-dragonhunter', 'Dragonhunter Integration', [
-          verticalIntegrators('sub-star-dragonhunter-core-elements', 'Dragonhunter Integration'),
-        ]),
-      ],
-    }),
-    e({
-      id: 'sub-star-articulated-barrel',
-      name: 'Articulated Barrel',
-      type: 'Subsystem',
-      description: 'Articulated barrel assembly for improved accuracy on S-TAR.',
-      parentId: 'sys-star',
-      tags: ['barrel', 'articulated'],
-      children: [
-        coreElements('sub-star-articulated-barrel', 'Articulated Barrel', [
-          verticalIntegrators('sub-star-articulated-barrel-core-elements', 'Articulated Barrel'),
-        ]),
-      ],
-    }),
-    e({
-      id: 'sub-star-optics',
-      name: 'Optics & Sighting',
-      type: 'Subsystem',
-      description: 'Optics and sighting specific to the S-TAR sniper platform.',
-      parentId: 'sys-star',
-      tags: ['optics'],
-      children: [
-        coreElements('sub-star-optics', 'Optics & Sighting', [
-          verticalIntegrators('sub-star-optics-core-elements', 'Optics & Sighting'),
-        ]),
-      ],
-    }),
-  ]),
+  children: [
+    cloneForPlatform(SUB_SCOPE, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_OPTICAL, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_MACHINE_VISION, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_SENSOR_FUSION, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_BALLISTICS, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_PIXEL_TO_POSITION, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_BARREL_ACTUATION, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_CHASSIS, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_RECEIVER, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_TRIGGER, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_POWER, 'star-', 'sys-star'),
+    cloneForPlatform(SUB_CLOSED_LOOP, 'star-', 'sys-star'),
+  ],
 });
 
 /** M-TAR — mounted TAR for technical vehicles, armored vehicles, and helicopters. Placeholder subsystems. */
@@ -671,10 +663,19 @@ export const SUBSYSTEM_COLORS: Record<string, string> = {
   'sub-trigger': 'pink',
   'sub-power': 'amber',
   'sub-closed-loop': 'indigo',
-  // S-TAR / M-TAR placeholders (extend as subsystems are added)
-  'sub-star-dragonhunter': 'emerald',
-  'sub-star-articulated-barrel': 'slate',
-  'sub-star-optics': 'fuchsia',
+  // S-TAR independent copies of TAR subsystems
+  'star-sub-scope': 'rose',
+  'star-sub-optical': 'lime',
+  'star-sub-machine-vision': 'sky',
+  'star-sub-sensor-fusion': 'orange',
+  'star-sub-ballistics': 'violet',
+  'star-sub-pixel-to-position': 'teal',
+  'star-sub-barrel-actuation': 'red',
+  'star-sub-chassis': 'yellow',
+  'star-sub-receiver': 'cyan',
+  'star-sub-trigger': 'pink',
+  'star-sub-power': 'amber',
+  'star-sub-closed-loop': 'indigo',
   'sub-mtar-mount': 'lime',
   'sub-mtar-power': 'amber',
   'sub-mtar-stabilization': 'cyan',
