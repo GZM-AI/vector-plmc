@@ -218,20 +218,21 @@ const SystemArchitecture: React.FC = () => {
       setHotspots(result.hotspots);
       setLayoutSource(result.source);
       setDirty(false);
-      if (platformId === 'sys-star') {
+      if (platformId === 'sys-star' || platformId === 'sys-mtar') {
         setLoadedIds([]);
         setActiveId(null);
         const tarNode = findInTree(productTree, 'sys-tar');
-        const starNode = findInTree(productTree, 'sys-star');
+        const destNode = findInTree(productTree, platformId);
         const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
-        const starSubs = (starNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
-        tarSubs.forEach((tar: any, i: number) => {
-          const star = starSubs[i];
-          if (!star) return;
-          if (tar?.name && tar.name !== star.name) {
-            updateEntityFields(star.id, { name: tar.name, description: tar.description, modifiedBy: 'TAR copy' });
+        const destSubs = (destNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
+        const prefix = platformId === 'sys-star' ? 'star-' : 'mtar-';
+        tarSubs.forEach((tar: any) => {
+          const dest = destSubs.find((s: any) => s.id === `${prefix}${tar.id}`);
+          if (!dest) return;
+          if (tar?.name && tar.name !== dest.name) {
+            updateEntityFields(dest.id, { name: tar.name, description: tar.description, modifiedBy: 'TAR copy' });
           }
-          copyZoneContents(tar, star);
+          copyZoneContents(tar, dest);
         });
       } else {
         setLoadedIds([]);
@@ -264,7 +265,10 @@ const SystemArchitecture: React.FC = () => {
     const tarPos = new Map(tarHotspots.map((h) => [h.id, h]));
     return subsystems.map((s: any, i: number) => {
       const saved = byId.get(s.id) || byName.get(String(s.name || '').trim().toLowerCase());
-      const tar = platformId === 'sys-star' ? tarSubs[i] : undefined;
+      const prefix = platformId === 'sys-star' ? 'star-' : platformId === 'sys-mtar' ? 'mtar-' : '';
+      const tar = prefix && s.id.startsWith(prefix)
+        ? tarSubs.find((t: any) => t.id === s.id.slice(prefix.length))
+        : undefined;
       const fromTar = tar ? tarPos.get(tar.id) : undefined;
       // Saved S-TAR positions win so Edit zones can move them. TAR is only the fallback.
       const src = saved || fromTar;
@@ -405,7 +409,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v9`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v10`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
@@ -514,13 +518,13 @@ const SystemArchitecture: React.FC = () => {
             {visibleHotspots.map((h) => {
               const zoneNode = findInTree(productTree, h.id);
               let components = zoneComponents(zoneNode);
-              if (platformId === 'sys-star') {
-                const tarNode = findInTree(productTree, 'sys-tar');
-                const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
-                const starSubs = subsystems;
-                const idx = starSubs.findIndex((s: any) => s.id === h.id);
-                const tarZone = idx >= 0 ? tarSubs[idx] : undefined;
-                if (tarZone) components = zoneComponents(tarZone);
+              if (platformId === 'sys-star' || platformId === 'sys-mtar') {
+                const prefix = platformId === 'sys-star' ? 'star-' : 'mtar-';
+                if (h.id.startsWith(prefix)) {
+                  const tarId = h.id.slice(prefix.length);
+                  const tarZone = findInTree(productTree, tarId);
+                  if (tarZone) components = zoneComponents(tarZone);
+                }
               }
               return (
                 <div
