@@ -406,7 +406,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v8`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v9`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
@@ -600,11 +600,11 @@ const SystemArchitecture: React.FC = () => {
                     'inline-flex items-center gap-1.5 text-[12px] leading-none px-2.5 py-1.5 rounded-full border ' +
                     (activeId === h.id ? 'ring-1 ring-white ' : '')
                   }
-                  style={
-                    onMap
-                      ? { borderColor: h.color, backgroundColor: h.color, color: '#111' }
-                      : { borderColor: h.color, color: h.color, backgroundColor: 'transparent' }
-                  }
+                  style={{
+                    borderColor: h.color,
+                    color: h.color,
+                    backgroundColor: onMap ? hexToRgba(h.color, 0.18) : 'transparent',
+                  }}
                 >
                   <span className="truncate max-w-[11rem]">{h.label || labelFor(h.id)}</span>
                   {onMap && (
