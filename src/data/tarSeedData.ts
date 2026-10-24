@@ -589,7 +589,8 @@ export const MTAR_SYSTEM: ResourceEntity = e({
   status: 'Draft',
   revision: 'A',
   lifecycleStage: 'concept',
-  children: withParent('sys-mtar', [
+  children: [
+    // Existing M-TAR chips — keep these
     e({
       id: 'sub-mtar-mount',
       name: 'Vehicle / Aircraft Mount',
@@ -629,7 +630,20 @@ export const MTAR_SYSTEM: ResourceEntity = e({
         ]),
       ],
     }),
-  ]),
+    // Copied TAR zones — independent, placed after the 3 existing chips
+    cloneForPlatform(SUB_SCOPE, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_OPTICAL, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_MACHINE_VISION, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_SENSOR_FUSION, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_BALLISTICS, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_PIXEL_TO_POSITION, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_BARREL_ACTUATION, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_CHASSIS, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_RECEIVER, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_TRIGGER, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_POWER, 'mtar-', 'sys-mtar'),
+    cloneForPlatform(SUB_CLOSED_LOOP, 'mtar-', 'sys-mtar'),
+  ],
 });
 
 /** Thin family root — always expanded in Registry Tree; not editable. */
