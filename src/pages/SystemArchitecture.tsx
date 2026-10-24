@@ -88,6 +88,8 @@ const SystemArchitecture: React.FC = () => {
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState<string | null>(null);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [treeTick, setTreeTick] = useState(0);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -226,14 +228,20 @@ const SystemArchitecture: React.FC = () => {
         const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
         const destSubs = (destNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
         const prefix = platformId === 'sys-star' ? 'star-' : 'mtar-';
-        tarSubs.forEach((tar: any) => {
-          const dest = destSubs.find((s: any) => s.id === `${prefix}${tar.id}`);
-          if (!dest) return;
-          if (tar?.name && tar.name !== dest.name) {
-            updateEntityFields(dest.id, { name: tar.name, description: tar.description, modifiedBy: 'TAR copy' });
-          }
-          copyZoneContents(tar, dest);
-        });
+        const flag = `vector-${prefix}contents-copied-v1`;
+        let already = false;
+        try { already = localStorage.getItem(flag) === '1'; } catch { /* ignore */ }
+        if (!already) {
+          tarSubs.forEach((tar: any) => {
+            const dest = destSubs.find((s: any) => s.id === `${prefix}${tar.id}`);
+            if (!dest) return;
+            if (tar?.name && tar.name !== dest.name) {
+              updateEntityFields(dest.id, { name: tar.name, description: tar.description, modifiedBy: 'TAR copy' });
+            }
+            copyZoneContents(tar, dest);
+          });
+          try { localStorage.setItem(flag, '1'); } catch { /* ignore */ }
+        }
       } else {
         setLoadedIds([]);
         setActiveId(null);
@@ -281,7 +289,7 @@ const SystemArchitecture: React.FC = () => {
       const tarColor = fromTar?.color || tarDefault?.color;
       return {
         id: s.id,
-        label: tar?.name || s.name,
+        label: s.name,
         left: src?.left ?? fallback?.left ?? 8 + (i % 3) * 22,
         top: src?.top ?? fallback?.top ?? 10 + Math.floor(i / 3) * 28,
         width: src?.width ?? fallback?.width ?? 18,
@@ -360,6 +368,20 @@ const SystemArchitecture: React.FC = () => {
     });
   };
 
+  const startRename = (id: string, current: string) => {
+    setRenamingId(id);
+    setRenameValue(current);
+  };
+  const commitRename = () => {
+    if (!renamingId) return;
+    const name = renameValue.trim();
+    if (name) {
+      updateEntityFields(renamingId, { name, modifiedBy: 'Architecture' });
+      setSaveMessage(`Renamed to “${name}”. Registry and Planning updated.`);
+    }
+    setRenamingId(null);
+  };
+
   const showAllZones = () => setLoadedIds(platformHotspots.map((h) => h.id));
 
   const hideAllZones = () => {
@@ -415,7 +437,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v11`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v12`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
@@ -523,15 +545,7 @@ const SystemArchitecture: React.FC = () => {
 
             {visibleHotspots.map((h) => {
               const zoneNode = findInTree(productTree, h.id);
-              let components = zoneComponents(zoneNode);
-              if (platformId === 'sys-star' || platformId === 'sys-mtar') {
-                const prefix = platformId === 'sys-star' ? 'star-' : 'mtar-';
-                if (h.id.startsWith(prefix)) {
-                  const tarId = h.id.slice(prefix.length);
-                  const tarZone = findInTree(productTree, tarId);
-                  if (tarZone) components = zoneComponents(tarZone);
-                }
-              }
+              const components = zoneComponents(zoneNode);
               return (
                 <div
                   key={h.id}
@@ -594,7 +608,7 @@ const SystemArchitecture: React.FC = () => {
           </div>
 
           <p className="mt-3 text-[11px] text-zinc-500">
-            Click a chip to load it. Click again (or the ×) to remove it. Several can be on at once.
+            Click a chip to load it. Double-click to rename — that updates System Registry and Planning. Click again (or the ×) to remove it.
           </p>
           <div className="mt-2 flex flex-wrap gap-2">
             {orderedHotspots.map((h) => {
@@ -603,8 +617,13 @@ const SystemArchitecture: React.FC = () => {
                 <button
                   key={h.id}
                   type="button"
-                  onClick={() => toggleZone(h.id)}
-                  title={onMap ? 'Remove zone from map' : 'Load zone onto map'}
+                  onClick={() => { if (renamingId !== h.id) toggleZone(h.id); }}
+                  onDoubleClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    startRename(h.id, h.label || labelFor(h.id));
+                  }}
+                  title="Click to load. Double-click to rename — updates Registry and Planning."
                   className={
                     'inline-flex items-center gap-1.5 text-[12px] leading-none px-2.5 py-1.5 rounded-full border ' +
                     (activeId === h.id ? 'ring-1 ring-white ' : '')
@@ -615,7 +634,22 @@ const SystemArchitecture: React.FC = () => {
                     backgroundColor: onMap ? hexToRgba(h.color, 0.18) : 'transparent',
                   }}
                 >
-                  <span className="truncate max-w-[11rem]">{h.label || labelFor(h.id)}</span>
+                  {renamingId === h.id ? (
+                    <input
+                      autoFocus
+                      value={renameValue}
+                      onChange={(e) => setRenameValue(e.target.value)}
+                      onClick={(e) => e.stopPropagation()}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') commitRename();
+                        if (e.key === 'Escape') setRenamingId(null);
+                      }}
+                      className="bg-transparent border-b border-current outline-none text-[12px] w-28 text-white"
+                    />
+                  ) : (
+                    <span className="truncate max-w-[11rem]">{h.label || labelFor(h.id)}</span>
+                  )}
                   {onMap && (
                     <span
                       className="inline-flex w-3.5 h-3.5 items-center justify-center rounded-full bg-black/40 text-white text-[10px]"
