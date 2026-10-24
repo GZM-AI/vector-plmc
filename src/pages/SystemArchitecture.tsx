@@ -219,9 +219,8 @@ const SystemArchitecture: React.FC = () => {
       setLayoutSource(result.source);
       setDirty(false);
       if (platformId === 'sys-star') {
-        const ids = platformSubsystems.map((s) => s.id);
-        setLoadedIds(ids);
-        setActiveId(ids[0] ?? null);
+        setLoadedIds([]);
+        setActiveId(null);
         const tarNode = findInTree(productTree, 'sys-tar');
         const starNode = findInTree(productTree, 'sys-star');
         const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
