@@ -207,7 +207,6 @@ const SystemArchitecture: React.FC = () => {
             updateEntityFields(s.id, { name: tar.name, modifiedBy: 'TAR copy' });
           }
         });
-        setSaveMessage('S-TAR zones are using TAR titles and positions.');
       } else {
         setLoadedIds([]);
         setActiveId(null);
