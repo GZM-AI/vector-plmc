@@ -266,13 +266,19 @@ const SystemArchitecture: React.FC = () => {
     return subsystems.map((s: any, i: number) => {
       const saved = byId.get(s.id) || byName.get(String(s.name || '').trim().toLowerCase());
       const prefix = platformId === 'sys-star' ? 'star-' : platformId === 'sys-mtar' ? 'mtar-' : '';
-      const tar = prefix && s.id.startsWith(prefix)
-        ? tarSubs.find((t: any) => t.id === s.id.slice(prefix.length))
-        : undefined;
+      const tarId = prefix && s.id.startsWith(prefix) ? s.id.slice(prefix.length) : '';
+      const tar = tarId ? tarSubs.find((t: any) => t.id === tarId) : undefined;
       const fromTar = tar ? tarPos.get(tar.id) : undefined;
-      // Saved S-TAR positions win so Edit zones can move them. TAR is only the fallback.
+      const tarDefault = tarId ? DEFAULT_HOTSPOTS.find((h) => h.id === tarId) : undefined;
+      const mtarOriginal: Record<string, string> = {
+        'sub-mtar-mount': '#84cc16',
+        'sub-mtar-power': '#f59e0b',
+        'sub-mtar-stabilization': '#22d3ee',
+      };
+      // Saved positions win so edits stick. Titles and colors for copied zones come from TAR.
       const src = saved || fromTar;
       const fallback = defaultById.get(s.id);
+      const tarColor = fromTar?.color || tarDefault?.color;
       return {
         id: s.id,
         label: tar?.name || s.name,
@@ -280,7 +286,7 @@ const SystemArchitecture: React.FC = () => {
         top: src?.top ?? fallback?.top ?? 10 + Math.floor(i / 3) * 28,
         width: src?.width ?? fallback?.width ?? 18,
         height: src?.height ?? fallback?.height ?? 20,
-        color: src?.color ?? fallback?.color ?? '#94a3b8',
+        color: tarColor || mtarOriginal[s.id] || src?.color || fallback?.color || '#94a3b8',
       };
     });
   }, [hotspots, tarHotspots, subsystems, platformId, productTree]);
@@ -409,7 +415,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v10`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v11`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
