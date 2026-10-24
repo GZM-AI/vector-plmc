@@ -199,7 +199,15 @@ const SystemArchitecture: React.FC = () => {
         const ids = platformSubsystems.map((s) => s.id);
         setLoadedIds(ids);
         setActiveId(ids[0] ?? null);
-        setSaveMessage('S-TAR zones are using TAR positions.');
+        const tarNode = findInTree(productTree, 'sys-tar');
+        const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
+        platformSubsystems.forEach((s, i) => {
+          const tar = tarSubs[i];
+          if (tar?.name && tar.name !== s.name) {
+            updateEntityFields(s.id, { name: tar.name, modifiedBy: 'TAR copy' });
+          }
+        });
+        setSaveMessage('S-TAR zones are using TAR titles and positions.');
       } else {
         setLoadedIds([]);
         setActiveId(null);
@@ -372,7 +380,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v6`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v7`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
@@ -659,7 +667,7 @@ const SystemArchitecture: React.FC = () => {
                       className="text-left text-sm px-3 py-2 rounded-xl bg-zinc-950 border text-zinc-300 hover:border-blue-600"
                       style={hs ? { borderColor: hs.color, color: hs.color } : undefined}
                     >
-                      {s.name}
+                      {hs?.label || s.name}
                     </button>
                   );
                 })}
