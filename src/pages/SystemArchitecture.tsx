@@ -49,6 +49,29 @@ function zoneComponents(node: any): { id: string; name: string }[] {
     .map((c: any) => ({ id: c.id, name: c.name }));
 }
 
+
+/** Copy TAR zone contents onto the matching S-TAR zone (names + descriptions, by order). */
+function copyZoneContents(tarNode: any, starNode: any): void {
+  if (!tarNode || !starNode) return;
+  const tarKids = (tarNode.children || []).filter((c: any) => c && c.name);
+  const starKids = (starNode.children || []).filter((c: any) => c && c.name);
+  const n = Math.max(tarKids.length, starKids.length);
+  for (let i = 0; i < n; i++) {
+    const t = tarKids[i];
+    const s = starKids[i];
+    if (t && s) {
+      if (t.name !== s.name || (t.description && t.description !== s.description)) {
+        updateEntityFields(s.id, {
+          name: t.name,
+          description: t.description,
+          modifiedBy: 'TAR copy',
+        });
+      }
+      copyZoneContents(t, s);
+    }
+  }
+}
+
 const SystemArchitecture: React.FC = () => {
   const [activeId, setActiveId] = useState<string | null>(null);
   const [loadedIds, setLoadedIds] = useState<string[]>([]);
@@ -200,12 +223,16 @@ const SystemArchitecture: React.FC = () => {
         setLoadedIds(ids);
         setActiveId(ids[0] ?? null);
         const tarNode = findInTree(productTree, 'sys-tar');
+        const starNode = findInTree(productTree, 'sys-star');
         const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
-        platformSubsystems.forEach((s, i) => {
-          const tar = tarSubs[i];
-          if (tar?.name && tar.name !== s.name) {
-            updateEntityFields(s.id, { name: tar.name, modifiedBy: 'TAR copy' });
+        const starSubs = (starNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
+        tarSubs.forEach((tar: any, i: number) => {
+          const star = starSubs[i];
+          if (!star) return;
+          if (tar?.name && tar.name !== star.name) {
+            updateEntityFields(star.id, { name: tar.name, description: tar.description, modifiedBy: 'TAR copy' });
           }
+          copyZoneContents(tar, star);
         });
       } else {
         setLoadedIds([]);
@@ -379,7 +406,7 @@ const SystemArchitecture: React.FC = () => {
               ? dirty
                 ? 'EDIT ON — unsaved changes · drag zones · white corner resizes'
                 : 'EDIT ON — drag zones · white corner resizes'
-              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v7`}
+              : `${activeSystem?.name || 'TAR™'} · ${loadedIds.length} of ${hotspots.length} zones on map · ${sourceLabel} · zones-v8`}
           </p>
           <PlatformSelector className="mt-3" />
         </div>
@@ -487,7 +514,15 @@ const SystemArchitecture: React.FC = () => {
 
             {visibleHotspots.map((h) => {
               const zoneNode = findInTree(productTree, h.id);
-              const components = zoneComponents(zoneNode);
+              let components = zoneComponents(zoneNode);
+              if (platformId === 'sys-star') {
+                const tarNode = findInTree(productTree, 'sys-tar');
+                const tarSubs = (tarNode?.children || []).filter((c: any) => c?.type === 'Subsystem');
+                const starSubs = subsystems;
+                const idx = starSubs.findIndex((s: any) => s.id === h.id);
+                const tarZone = idx >= 0 ? tarSubs[idx] : undefined;
+                if (tarZone) components = zoneComponents(tarZone);
+              }
               return (
                 <div
                   key={h.id}
