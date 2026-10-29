@@ -1,1 +1,41 @@
-PLACEHOLDER_FIX
+{
+  "auth": {
+    "user_pool_id": "us-west-2_1Kry5Hphg",
+    "aws_region": "us-west-2",
+    "user_pool_client_id": "44nd3qek7cve9pnqm4coci398h",
+    "identity_pool_id": "us-west-2:ef39ef02-876b-4d0b-912c-582b9c21b56b",
+    "mfa_methods": [],
+    "standard_required_attributes": ["email"],
+    "username_attributes": ["email"],
+    "user_verification_types": ["email"],
+    "groups": [],
+    "mfa_configuration": "NONE",
+    "password_policy": {
+      "min_length": 8,
+      "require_lowercase": true,
+      "require_numbers": true,
+      "require_symbols": true,
+      "require_uppercase": true
+    },
+    "unauthenticated_identities_enabled": true
+  },
+  "storage": {
+    "aws_region": "us-west-2",
+    "bucket_name": "amplify-dgz4udf7zdngn-mai-vectorplmdocumentsbucket-jpoyyc3vzn6m",
+    "buckets": [
+      {
+        "name": "vectorPlmDocuments",
+        "bucket_name": "amplify-dgz4udf7zdngn-mai-vectorplmdocumentsbucket-jpoyyc3vzn6m",
+        "aws_region": "us-west-2",
+        "paths": {
+          "documents/*": {
+            "authenticated": ["get", "list", "write", "delete"]
+          },
+          "models/*": {
+            "authenticated": ["get", "list", "write", "delete"]
+          }
+        }
+      }
+    ]
+  }
+}
