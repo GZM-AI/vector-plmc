@@ -50,7 +50,7 @@ function looksLikeGlb(buf: ArrayBuffer): boolean {
   return view.getUint32(0, true) === 0x46546c67;
 }
 
-/** Clone and scale so the largest dimension is ~4 units — fills a typical stage. */
+/** Clone and scale so the largest dimension fills the stage. */
 function Model({ src }: { src: string }) {
   const { scene } = useGLTF(src);
   const prepared = useMemo(() => {
@@ -59,10 +59,9 @@ function Model({ src }: { src: string }) {
     const size = new THREE.Vector3();
     box.getSize(size);
     const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    const target = 4.2;
+    const target = 8.5;
     const scale = target / maxDim;
     cloned.scale.setScalar(scale);
-    // Re-center after scale
     const scaledBox = new THREE.Box3().setFromObject(cloned);
     const center = new THREE.Vector3();
     scaledBox.getCenter(center);
@@ -126,7 +125,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
         <ViewerErrorBoundary onError={setLoadError}>
           <Canvas
             style={{ width: '100%', height: '100%', display: 'block' }}
-            camera={{ position: [0, 1.2, 6.5], fov: 35 }}
+            camera={{ position: [0, 0.8, 5.2], fov: 32 }}
             dpr={[1, 2]}
             gl={{ antialias: true, alpha: false }}
           >
@@ -135,7 +134,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
             <directionalLight position={[6, 10, 6]} intensity={1.4} />
             <directionalLight position={[-5, 4, -3]} intensity={0.5} />
             <Suspense fallback={null}>
-              <Bounds fit clip observe margin={1.02}>
+              <Bounds fit clip observe margin={0.85}>
                 <Center>
                   <Model src={blobUrl} />
                 </Center>
@@ -145,8 +144,8 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
               makeDefault
               enableDamping
               dampingFactor={0.08}
-              minDistance={0.5}
-              maxDistance={20}
+              minDistance={0.3}
+              maxDistance={24}
               target={[0, 0, 0]}
             />
           </Canvas>
