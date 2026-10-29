@@ -1,6 +1,9 @@
 /**
  * Shared Cognito lock — Vector + PID
  * One pool: AWS-USER-POOL. Use the client PID already signs in with.
+ *
+ * Storage (models, documents) needs the Identity Pool to mint temporary
+ * credentials. Do not strip identityPoolId.
  */
 import { Amplify } from 'aws-amplify';
 
@@ -13,12 +16,12 @@ export const SHARED_COGNITO = {
 
 export function applySharedCognitoLock(outputs: Record<string, unknown>): Record<string, unknown> {
   const prev = { ...((outputs.auth as Record<string, unknown>) || {}) };
-  delete prev.identity_pool_id;
   const auth = {
     ...prev,
     aws_region: SHARED_COGNITO.region,
     user_pool_id: SHARED_COGNITO.userPoolId,
     user_pool_client_id: SHARED_COGNITO.userPoolClientId,
+    identity_pool_id: SHARED_COGNITO.identityPoolId,
     username_attributes: ['email'],
     standard_required_attributes: ['email'],
     user_verification_types: ['email'],
@@ -33,7 +36,6 @@ export function lockAmplifyAuthRuntime(): void {
   const cognito = {
     ...((current.Auth as { Cognito?: Record<string, unknown> } | undefined)?.Cognito || {}),
   };
-  delete cognito.identityPoolId;
   Amplify.configure({
     ...current,
     Auth: {
@@ -42,6 +44,7 @@ export function lockAmplifyAuthRuntime(): void {
         ...cognito,
         userPoolId: SHARED_COGNITO.userPoolId,
         userPoolClientId: SHARED_COGNITO.userPoolClientId,
+        identityPoolId: SHARED_COGNITO.identityPoolId,
         loginWith: { email: true },
       },
     },
