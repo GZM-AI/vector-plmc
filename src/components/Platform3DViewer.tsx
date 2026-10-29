@@ -130,9 +130,10 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
             gl={{ antialias: true, alpha: false }}
           >
             <color attach="background" args={['#09090b']} />
-            <ambientLight intensity={0.7} />
-            <directionalLight position={[6, 10, 6]} intensity={1.4} />
-            <directionalLight position={[-5, 4, -3]} intensity={0.5} />
+            <ambientLight intensity={1.05} />
+            <directionalLight position={[6, 10, 6]} intensity={1.8} />
+            <directionalLight position={[-5, 4, -3]} intensity={0.75} />
+            <directionalLight position={[0, 2, 8]} intensity={0.55} />
             <Suspense fallback={null}>
               <Bounds fit clip observe margin={0.7}>
                 <Center>
