@@ -48,7 +48,6 @@ function toStringSrc(value: unknown): string {
 function looksLikeGlb(buf: ArrayBuffer): boolean {
   if (buf.byteLength < 12) return false;
   const view = new DataView(buf);
-  // GLB magic is "glTF" (0x46546C67 little-endian)
   return view.getUint32(0, true) === 0x46546c67;
 }
 
@@ -60,7 +59,7 @@ function Model({ src }: { src: string }) {
 
 /**
  * Interactive 3D viewer for a platform model (GLB).
- * Fetches as binary first so an S3/XML error page is not parsed as a model.
+ * Fills its parent completely. Parent should be position:relative with a defined height.
  */
 export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3DViewerProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -78,12 +77,9 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
     (async () => {
       try {
         const res = await fetch(safeSrc);
-        if (!res.ok) {
-          throw new Error(`Model request failed (${res.status})`);
-        }
+        if (!res.ok) throw new Error(`Model request failed (${res.status})`);
         const buf = await res.arrayBuffer();
         if (!looksLikeGlb(buf)) {
-          // Likely an XML/HTML error page from S3 or Amplify
           const preview = new TextDecoder().decode(buf.slice(0, 180)).replace(/\s+/g, ' ').trim();
           throw new Error(
             preview.startsWith('<?xml') || preview.startsWith('<Error') || preview.startsWith('<!DOCTYPE') || preview.startsWith('<html')
@@ -95,9 +91,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
         created = URL.createObjectURL(blob);
         if (!cancelled) setBlobUrl(created);
       } catch (err) {
-        if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : String(err));
-        }
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : String(err));
       } finally {
         if (!cancelled) setChecking(false);
       }
@@ -110,10 +104,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
   }, [safeSrc]);
 
   return (
-    <div
-      className={`relative w-full bg-black rounded-2xl overflow-hidden ${className}`}
-      style={{ minHeight: 480 }}
-    >
+    <div className={`absolute inset-0 bg-black ${className}`}>
       {checking && (
         <div className="absolute inset-0 flex items-center justify-center text-zinc-400 text-sm">
           Loading 3D model…
@@ -123,16 +114,17 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
       {!checking && blobUrl && (
         <ViewerErrorBoundary onError={setLoadError}>
           <Canvas
-            camera={{ position: [2.5, 1.6, 3.2], fov: 45 }}
+            style={{ width: '100%', height: '100%', display: 'block' }}
+            camera={{ position: [3, 2, 4], fov: 40 }}
             dpr={[1, 2]}
             gl={{ antialias: true, alpha: false }}
           >
             <color attach="background" args={['#09090b']} />
-            <ambientLight intensity={0.6} />
-            <directionalLight position={[5, 8, 5]} intensity={1.2} />
-            <directionalLight position={[-4, 3, -2]} intensity={0.4} />
+            <ambientLight intensity={0.65} />
+            <directionalLight position={[6, 10, 6]} intensity={1.3} />
+            <directionalLight position={[-5, 4, -3]} intensity={0.45} />
             <Suspense fallback={null}>
-              <Bounds fit clip observe margin={1.2}>
+              <Bounds fit clip observe margin={1.05}>
                 <Center>
                   <Model src={blobUrl} />
                 </Center>
@@ -142,8 +134,8 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
               makeDefault
               enableDamping
               dampingFactor={0.08}
-              minDistance={0.5}
-              maxDistance={30}
+              minDistance={0.2}
+              maxDistance={40}
             />
           </Canvas>
         </ViewerErrorBoundary>
@@ -158,7 +150,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
         </div>
       )}
 
-      <div className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-black/70 text-xs text-zinc-300 border border-zinc-700 pointer-events-none">
+      <div className="absolute top-3 left-3 px-3 py-1.5 rounded-lg bg-black/70 text-xs text-zinc-300 border border-zinc-700 pointer-events-none z-10">
         {label || '3D view'} · drag to orbit · scroll to zoom
       </div>
     </div>
