@@ -38,8 +38,16 @@ class ViewerErrorBoundary extends Component<
   }
 }
 
+function toStringSrc(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (value instanceof URL) return value.href;
+  if (value && typeof (value as { href?: string }).href === 'string') return (value as { href: string }).href;
+  return String(value ?? '');
+}
+
 function Model({ src }: { src: string }) {
-  const { scene } = useGLTF(src);
+  const safeSrc = toStringSrc(src);
+  const { scene } = useGLTF(safeSrc);
   const cloned = useMemo(() => scene.clone(), [scene]);
   return <primitive object={cloned} />;
 }
@@ -50,6 +58,7 @@ function Model({ src }: { src: string }) {
  */
 export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3DViewerProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
+  const safeSrc = toStringSrc(modelSrc);
 
   return (
     <div
@@ -69,7 +78,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
           <Suspense fallback={null}>
             <Bounds fit clip observe margin={1.2}>
               <Center>
-                <Model src={modelSrc} />
+                <Model src={safeSrc} />
               </Center>
             </Bounds>
           </Suspense>
@@ -101,7 +110,7 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
 
 export function preloadPlatformModel(src: string) {
   try {
-    useGLTF.preload(src);
+    useGLTF.preload(toStringSrc(src));
   } catch {
     /* ignore */
   }
