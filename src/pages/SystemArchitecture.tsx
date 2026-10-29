@@ -591,7 +591,11 @@ const SystemArchitecture: React.FC = () => {
           <div
             ref={containerRef}
             className="relative w-full bg-black rounded-2xl overflow-hidden"
-            style={{ userSelect: 'none' }}
+            style={{
+              userSelect: 'none',
+              aspectRatio: viewMode === '3d' ? '1728 / 1008' : undefined,
+              minHeight: viewMode === '3d' ? 480 : undefined,
+            }}
           >
             {viewMode === '3d' ? (
               modelLoading ? (
@@ -826,3 +830,4 @@ const SystemArchitecture: React.FC = () => {
 };
 
 export default SystemArchitecture;
+
