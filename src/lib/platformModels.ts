@@ -42,6 +42,20 @@ export type PlatformModelResult = {
   reason: string | null;
 };
 
+function toPlainUrl(value: unknown): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (value instanceof URL) return value.href;
+  if (typeof (value as { href?: string }).href === 'string') return (value as { href: string }).href;
+  try {
+    const s = String(value);
+    if (s && s !== '[object Object]') return s;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /**
  * Signed URL for a platform model.
  * Always returns a reason when url is null so the UI can explain the failure.
@@ -61,20 +75,27 @@ export async function getPlatformModelUrl(
   }
 
   try {
-    const { url } = await getUrl({
+    const result = await getUrl({
       path,
       options: { expiresIn },
     });
-    return { url: url.toString(), path, reason: null };
+    const url = toPlainUrl(result?.url);
+    if (!url) {
+      return { url: null, path, reason: 'Storage returned a URL that was not a string.' };
+    }
+    return { url, path, reason: null };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    // Retry once with a slightly different call shape in case of API variance
     try {
-      const { url } = await getUrl({
+      const result = await getUrl({
         path,
         options: { expiresIn, validateObjectExistence: false },
       } as never);
-      return { url: url.toString(), path, reason: null };
+      const url = toPlainUrl((result as { url?: unknown })?.url);
+      if (!url) {
+        return { url: null, path, reason: 'Storage returned a URL that was not a string.' };
+      }
+      return { url, path, reason: null };
     } catch (err2) {
       const msg2 = err2 instanceof Error ? err2.message : String(err2);
       return {
