@@ -1,11 +1,10 @@
 import React, { Component, Suspense, useEffect, useMemo, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, useGLTF, Center, Bounds } from '@react-three/drei';
+import * as THREE from 'three';
 
 type Platform3DViewerProps = {
-  /** Signed URL or public path to a GLB */
   modelSrc: string;
-  /** Optional label shown in the overlay */
   label?: string;
   className?: string;
 };
@@ -51,16 +50,28 @@ function looksLikeGlb(buf: ArrayBuffer): boolean {
   return view.getUint32(0, true) === 0x46546c67;
 }
 
+/** Clone and scale so the largest dimension is ~4 units — fills a typical stage. */
 function Model({ src }: { src: string }) {
   const { scene } = useGLTF(src);
-  const cloned = useMemo(() => scene.clone(), [scene]);
-  return <primitive object={cloned} />;
+  const prepared = useMemo(() => {
+    const cloned = scene.clone(true);
+    const box = new THREE.Box3().setFromObject(cloned);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    const maxDim = Math.max(size.x, size.y, size.z) || 1;
+    const target = 4.2;
+    const scale = target / maxDim;
+    cloned.scale.setScalar(scale);
+    // Re-center after scale
+    const scaledBox = new THREE.Box3().setFromObject(cloned);
+    const center = new THREE.Vector3();
+    scaledBox.getCenter(center);
+    cloned.position.sub(center);
+    return cloned;
+  }, [scene]);
+  return <primitive object={prepared} />;
 }
 
-/**
- * Interactive 3D viewer for a platform model (GLB).
- * Fills its parent completely. Parent should be position:relative with a defined height.
- */
 export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3DViewerProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
@@ -115,16 +126,16 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
         <ViewerErrorBoundary onError={setLoadError}>
           <Canvas
             style={{ width: '100%', height: '100%', display: 'block' }}
-            camera={{ position: [3, 2, 4], fov: 40 }}
+            camera={{ position: [0, 1.2, 6.5], fov: 35 }}
             dpr={[1, 2]}
             gl={{ antialias: true, alpha: false }}
           >
             <color attach="background" args={['#09090b']} />
-            <ambientLight intensity={0.65} />
-            <directionalLight position={[6, 10, 6]} intensity={1.3} />
-            <directionalLight position={[-5, 4, -3]} intensity={0.45} />
+            <ambientLight intensity={0.7} />
+            <directionalLight position={[6, 10, 6]} intensity={1.4} />
+            <directionalLight position={[-5, 4, -3]} intensity={0.5} />
             <Suspense fallback={null}>
-              <Bounds fit clip observe margin={1.05}>
+              <Bounds fit clip observe margin={1.02}>
                 <Center>
                   <Model src={blobUrl} />
                 </Center>
@@ -134,8 +145,9 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
               makeDefault
               enableDamping
               dampingFactor={0.08}
-              minDistance={0.2}
-              maxDistance={40}
+              minDistance={0.5}
+              maxDistance={20}
+              target={[0, 0, 0]}
             />
           </Canvas>
         </ViewerErrorBoundary>
