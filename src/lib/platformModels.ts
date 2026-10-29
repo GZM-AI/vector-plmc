@@ -5,7 +5,7 @@
  *   tar.glb, star.glb, mtar.glb
  *
  * Authenticated only (same Cognito pool as the rest of Vector).
- * Returns a short-lived signed URL suitable for useGLTF / <model-viewer>.
+ * Returns a short-lived signed URL suitable for useGLTF.
  */
 import { getUrl, uploadData } from 'aws-amplify/storage';
 import { getCurrentUser } from 'aws-amplify/auth';
@@ -36,42 +36,58 @@ async function signedIn(): Promise<boolean> {
   }
 }
 
+export type PlatformModelResult = {
+  url: string | null;
+  path: string | null;
+  reason: string | null;
+};
+
 /**
- * Signed URL for a platform model, or null if missing / not signed in.
- * expiresIn is seconds (default 1 hour).
+ * Signed URL for a platform model.
+ * Always returns a reason when url is null so the UI can explain the failure.
  */
 export async function getPlatformModelUrl(
   platformId: string | undefined | null,
   expiresIn = 3600
-): Promise<string | null> {
+): Promise<PlatformModelResult> {
   const key = platformModelKey(platformId);
-  if (!key) return null;
-  if (!(await signedIn())) return null;
-
+  if (!key) {
+    return { url: null, path: null, reason: `No model mapping for platform ${platformId || '(none)'}` };
+  }
   const path = platformModelStoragePath(key);
+
+  if (!(await signedIn())) {
+    return { url: null, path, reason: 'Sign in required to load models from Amplify Storage.' };
+  }
+
   try {
     const { url } = await getUrl({
       path,
       options: { expiresIn },
     });
-    return url.toString();
-  } catch {
-    // Fallback for older Amplify Storage API shapes
+    return { url: url.toString(), path, reason: null };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    // Retry once with a slightly different call shape in case of API variance
     try {
       const { url } = await getUrl({
         path,
-        options: { expiresIn },
+        options: { expiresIn, validateObjectExistence: false },
       } as never);
-      return url.toString();
-    } catch {
-      return null;
+      return { url: url.toString(), path, reason: null };
+    } catch (err2) {
+      const msg2 = err2 instanceof Error ? err2.message : String(err2);
+      return {
+        url: null,
+        path,
+        reason: `Storage lookup failed for ${path}: ${msg2 || msg}`,
+      };
     }
   }
 }
 
 /**
  * Upload (or replace) a platform GLB.
- * Call this once from a console or a small admin control; then the viewer picks it up.
  */
 export async function uploadPlatformModel(
   platformId: string,
