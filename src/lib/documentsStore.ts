@@ -609,18 +609,16 @@ export async function unlinkDocumentFromEntity(documentId: string, entityId: str
 
 export async function deleteDocument(documentId: string): Promise<void> {
   const existing = state.documents.find((d) => d.id === documentId)
-  if (!existing) return
-  const mode = (await signedIn()) ? 'userPool' : 'apiKey'
-  const client = dataClient(mode)
-  const { errors } = await client.models.Document.delete({ id: documentId })
-  if (errors?.length) throw new Error(errors[0].message || 'Delete failed')
-  if (existing.storageKey && !existing.storageKey.startsWith('local:')) {
+  const client = dataClient()
+  if (existing?.storageKey) {
     try {
       await removeStorage({ path: existing.storageKey })
-    } catch {
-      /* best effort */
+    } catch (err) {
+      console.warn('[documentsStore] storage delete failed', err)
     }
   }
+  const { errors } = await client.models.Document.delete({ id: documentId })
+  if (errors?.length) throw new Error(errors[0].message || 'Delete failed')
   state.documents = state.documents.filter((d) => d.id !== documentId)
   emit()
 }
