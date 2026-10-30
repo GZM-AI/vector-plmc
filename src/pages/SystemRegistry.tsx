@@ -1614,12 +1614,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       try {
                         await deleteDocument(d.id);
                       } catch (err) {
-                        const msg = err instanceof Error ? err.message : String(err);
-                        setAttachErr(
-                          /unauthorized|not authorized|unauthenticated|rejected this delete/i.test(msg)
-                            ? 'Could not delete — the Document API rejected the request. Refresh after the next Amplify build, then try again.'
-                            : msg
-                        );
+                        setAttachErr(err instanceof Error ? err.message : String(err));
                       }
                     }}
                     className="p-1.5 rounded-lg text-zinc-500 hover:text-red-300 hover:bg-zinc-900"

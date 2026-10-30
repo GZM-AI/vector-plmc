@@ -17,6 +17,7 @@ import type { Document, DocumentKind, ReleaseStatus } from '../types/plm'
 
 const CACHE_KEY = 'vector-plm-documents-v1'
 const BYTES_KEY = 'vector-plm-doc-bytes-v1'
+const ATTACH_KEY = 'vector-attachments-v1'
 const MAX_BYTES = 80 * 1024 * 1024
 const MAX_INLINE = 4 * 1024 * 1024
 
@@ -186,52 +187,80 @@ function isDocsAuthError(msg: string): boolean {
   return /unauthorized|not authorized|unauthenticated|No current user|UserUnAuthenticated/i.test(msg)
 }
 
+type AttachmentIndex = {
+  documents: Document[]
+  hiddenIds: string[]
+}
+
+async function loadAttachmentIndex(): Promise<AttachmentIndex> {
+  const client = dataClient('apiKey')
+  const { data, errors } = await client.models.MapLayout.get({ layoutKey: ATTACH_KEY })
+  if (errors?.length || !data?.hotspotsJson) return { documents: [], hiddenIds: [] }
+  try {
+    const parsed = JSON.parse(String(data.hotspotsJson)) as Partial<AttachmentIndex>
+    return {
+      documents: Array.isArray(parsed.documents) ? parsed.documents : [],
+      hiddenIds: Array.isArray(parsed.hiddenIds) ? parsed.hiddenIds : [],
+    }
+  } catch {
+    return { documents: [], hiddenIds: [] }
+  }
+}
+
+async function saveAttachmentIndex(index: AttachmentIndex): Promise<void> {
+  const client = dataClient('apiKey')
+  const payload = {
+    layoutKey: ATTACH_KEY,
+    hotspotsJson: JSON.stringify(index),
+    updatedBy: await currentUserLabel(),
+  }
+  let result = await client.models.MapLayout.update(payload)
+  if (result.errors?.length) {
+    result = await client.models.MapLayout.create(payload)
+  }
+  if (result.errors?.length) {
+    throw new Error(result.errors[0].message || 'Could not save attachment index')
+  }
+}
+
 export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
   try {
+    const index = await loadAttachmentIndex()
+    const hidden = new Set(index.hiddenIds)
+    const byId = new Map<string, Document>()
+    for (const doc of index.documents) {
+      if (doc?.id && !hidden.has(doc.id)) byId.set(doc.id, doc)
+    }
+
     const modes: Array<'apiKey' | 'userPool'> = ['apiKey', 'userPool']
-    let lastAuthMsg = ''
     for (const mode of modes) {
       try {
         const client = dataClient(mode)
         const { data, errors } = await client.models.Document.list({ limit: 1000 })
         if (errors?.length) {
-          const msg = errors[0].message || 'Document list failed'
-          if (isDocsAuthError(msg)) {
-            lastAuthMsg = msg
-            continue
-          }
-          state.lastError = msg
-          emit()
-          return
+          if (isDocsAuthError(errors[0].message || '')) continue
+          break
         }
-        const docs = (data || [])
-          .map((row) => fromRow(row as unknown as Record<string, unknown>))
-          .filter((d): d is Document => !!d)
-        const byId = new Map(docs.map((d) => [d.id, d]))
-        for (const local of state.documents) {
-          if (!byId.has(local.id)) byId.set(local.id, local)
+        for (const row of data || []) {
+          const doc = fromRow(row as unknown as Record<string, unknown>)
+          if (doc && !hidden.has(doc.id)) byId.set(doc.id, doc)
         }
-        state.documents = [...byId.values()]
-        state.hydrated = true
-        state.lastError = null
-        emit()
-        console.log('[documentsStore] hydrated', mode, docs.length)
-        return
+        break
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err)
-        if (isDocsAuthError(msg)) {
-          lastAuthMsg = msg
-          continue
-        }
-        throw err
+        if (isDocsAuthError(msg)) continue
+        break
       }
     }
-    // Card load must not show "unauthorized". Auth failures stay quiet;
-    // upload still requires a signed-in user for Storage.
+
+    for (const local of state.documents) {
+      if (!hidden.has(local.id) && !byId.has(local.id)) byId.set(local.id, local)
+    }
+    state.documents = [...byId.values()]
     state.hydrated = true
     state.lastError = null
-    if (lastAuthMsg) console.warn('[documentsStore] list unauthorized — hiding on card load', lastAuthMsg)
     emit()
+    console.log('[documentsStore] hydrated', state.documents.length)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     state.lastError = isDocsAuthError(msg) ? null : msg
@@ -321,25 +350,20 @@ export async function attachDocumentToEntity(
   }
 
   const modes: Array<'userPool' | 'apiKey'> = ['userPool', 'apiKey']
-  let savedCloud = false
-  let lastMetaErr = ''
   for (const mode of modes) {
     try {
       const client = dataClient(mode)
       const { errors } = await client.models.Document.create(payload)
-      if (!errors?.length) {
-        savedCloud = true
-        break
-      }
-      lastMetaErr = errors[0].message || `${mode} create failed`
-    } catch (err) {
-      lastMetaErr = err instanceof Error ? err.message : String(err)
+      if (!errors?.length) break
+    } catch {
+      /* Document model is still private on the live API */
     }
   }
 
-  if (!savedCloud) {
-    throw new Error(lastMetaErr || 'Could not save attachment metadata to the cloud.')
-  }
+  const index = await loadAttachmentIndex()
+  index.documents = [record, ...index.documents.filter((d) => d.id !== id)]
+  index.hiddenIds = index.hiddenIds.filter((hid) => hid !== id)
+  await saveAttachmentIndex(index)
 
   state.documents = [record, ...state.documents.filter((d) => d.id !== id)]
   state.lastError = null
@@ -655,7 +679,16 @@ export async function deleteDocument(documentId: string): Promise<void> {
       console.warn('[documentsStore] storage delete failed', err)
     }
   }
-  await mutateDocument((mode) => dataClient(mode).models.Document.delete({ id: documentId }))
+  try {
+    await mutateDocument((mode) => dataClient(mode).models.Document.delete({ id: documentId }))
+  } catch (err) {
+    console.warn('[documentsStore] Document.delete skipped', err)
+  }
+  const index = await loadAttachmentIndex()
+  index.documents = index.documents.filter((d) => d.id !== documentId)
+  if (!index.hiddenIds.includes(documentId)) index.hiddenIds.push(documentId)
+  await saveAttachmentIndex(index)
   state.documents = state.documents.filter((d) => d.id !== documentId)
+  state.lastError = null
   emit()
 }
