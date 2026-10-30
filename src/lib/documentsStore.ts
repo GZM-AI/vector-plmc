@@ -10,7 +10,7 @@
  * Multiple files per entity are supported via linkedEntityIds.
  */
 import { generateClient } from 'aws-amplify/data'
-import { getCurrentUser } from 'aws-amplify/auth'
+import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth'
 import { uploadData, getUrl, remove as removeStorage } from 'aws-amplify/storage'
 import type { Schema } from '../../amplify/data/resource'
 import type { Document, DocumentKind, ReleaseStatus } from '../types/plm'
@@ -293,23 +293,44 @@ export async function attachDocumentToEntity(
   const name = (opts?.name || file.name.replace(/\.[^.]+$/, '') || file.name).trim()
   const contentType = file.type || 'application/octet-stream'
 
-  try {
-    await uploadData({
+  const session = await fetchAuthSession({ forceRefresh: true })
+  if (!session.credentials) {
+    throw new Error(
+      'Signed in, but Amplify Storage did not issue credentials. The identity pool is not accepting this app client.'
+    )
+  }
+
+  const attempts: Array<Record<string, unknown>> = [
+    {
+      path: storageKey,
+      data: file,
+      options: { contentType, bucket: 'vectorPlmDocuments' },
+    },
+    {
       path: storageKey,
       data: file,
       options: { contentType },
-    }).result
-  } catch (pathErr) {
+    },
+    {
+      key: storageKey,
+      data: file,
+      options: { contentType },
+    },
+  ]
+  let lastErr: unknown = null
+  for (const input of attempts) {
     try {
-      await (uploadData as (input: Record<string, unknown>) => { result: Promise<unknown> })({
-        key: storageKey,
-        data: file,
-        options: { contentType },
-      }).result
-    } catch {
-      console.warn('[documentsStore] storage upload failed', pathErr)
-      throw new Error('Cloud upload failed. Check your connection and Amplify Storage access.')
+      await (uploadData as (i: Record<string, unknown>) => { result: Promise<unknown> })(input).result
+      lastErr = null
+      break
+    } catch (err) {
+      lastErr = err
     }
+  }
+  if (lastErr) {
+    const detail = lastErr instanceof Error ? lastErr.message : String(lastErr)
+    console.warn('[documentsStore] storage upload failed', lastErr)
+    throw new Error(`Cloud upload failed: ${detail}`)
   }
 
   const record: Document = {
