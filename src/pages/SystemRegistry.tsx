@@ -1616,8 +1616,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                       } catch (err) {
                         const msg = err instanceof Error ? err.message : String(err);
                         setAttachErr(
-                          /unauthorized|not authorized|unauthenticated/i.test(msg)
-                            ? 'Could not delete this attachment. Sign in, then try again.'
+                          /unauthorized|not authorized|unauthenticated|rejected this delete/i.test(msg)
+                            ? 'Could not delete — the Document API rejected the request. Refresh after the next Amplify build, then try again.'
                             : msg
                         );
                       }

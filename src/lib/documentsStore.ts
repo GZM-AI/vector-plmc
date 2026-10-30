@@ -621,7 +621,7 @@ async function mutateDocument(
   }
   throw new Error(
     isDocsAuthError(last)
-      ? 'Could not delete this attachment. Sign in, then try again.'
+      ? 'The Document API rejected this delete. You are signed in, but AppSync still has Document as authenticated-only and is not accepting this session. A backend deploy is required.'
       : last
   )
 }
