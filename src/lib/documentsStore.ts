@@ -286,7 +286,9 @@ export async function attachDocumentToEntity(
 
   const id = `doc-${crypto.randomUUID()}`
   const fileName = safeFileName(file.name)
-  const storageKey = `documents/${id}/${fileName}`
+  // Shared identity-pool role AWS-USER-POOL-authenticated can PutObject on models/*
+  // (VectorModelsAccess) but not on documents/* or public/documents/*.
+  const storageKey = `models/attachments/${id}/${fileName}`
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
   const kind = opts?.kind || inferKind(file)
@@ -300,6 +302,8 @@ export async function attachDocumentToEntity(
     )
   }
 
+  let uploaded = false
+  let lastErr: unknown = null
   const attempts: Array<Record<string, unknown>> = [
     {
       path: storageKey,
@@ -311,23 +315,17 @@ export async function attachDocumentToEntity(
       data: file,
       options: { contentType },
     },
-    {
-      key: storageKey,
-      data: file,
-      options: { contentType },
-    },
   ]
-  let lastErr: unknown = null
   for (const input of attempts) {
     try {
       await (uploadData as (i: Record<string, unknown>) => { result: Promise<unknown> })(input).result
-      lastErr = null
+      uploaded = true
       break
     } catch (err) {
       lastErr = err
     }
   }
-  if (lastErr) {
+  if (!uploaded) {
     const detail = lastErr instanceof Error ? lastErr.message : String(lastErr)
     console.warn('[documentsStore] storage upload failed', lastErr)
     throw new Error(`Cloud upload failed: ${detail}`)
