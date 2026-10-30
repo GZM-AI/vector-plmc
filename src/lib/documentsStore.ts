@@ -286,9 +286,10 @@ export async function attachDocumentToEntity(
 
   const id = `doc-${crypto.randomUUID()}`
   const fileName = safeFileName(file.name)
-  // Shared identity-pool role AWS-USER-POOL-authenticated can PutObject on models/*
-  // (VectorModelsAccess) but not on documents/* or public/documents/*.
-  const storageKey = `models/attachments/${id}/${fileName}`
+  // Card files live in attachments/, not next to the platform GLBs under models/.
+  // AWS-USER-POOL-authenticated must allow s3:PutObject on attachments/* (same
+  // kind of inline policy as VectorModelsAccess on models/*).
+  const storageKey = `attachments/${id}/${fileName}`
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
   const kind = opts?.kind || inferKind(file)

@@ -4,17 +4,17 @@ import { defineStorage } from '@aws-amplify/backend';
  * Vector PLM — document binaries + platform 3D models (ITAR-adjacent)
  * Authenticated only. No guest access.
  * Keys:
- *   models/attachments/{documentId}/{fileName}  (live role allows models/*)
- *   documents/{documentId}/{fileName}           (after auth-role policy includes it)
- *   models/{platform}.glb
+ *   attachments/{documentId}/{fileName}   card uploads (not models)
+ *   documents/{documentId}/{fileName}     legacy path
+ *   models/{platform}.glb                 platform 3D only
  */
 export const storage = defineStorage({
   name: 'vectorPlmDocuments',
   access: (allow) => ({
-    'documents/*': [
+    'attachments/*': [
       allow.authenticated.to(['read', 'write', 'delete']),
     ],
-    'models/attachments/*': [
+    'documents/*': [
       allow.authenticated.to(['read', 'write', 'delete']),
     ],
     'models/*': [
