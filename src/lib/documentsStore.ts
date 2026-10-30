@@ -183,7 +183,7 @@ async function currentUserLabel(): Promise<string> {
 }
 
 function isDocsAuthError(msg: string): boolean {
-  return /not authorized to access listDocuments/i.test(msg)
+  return /unauthorized|not authorized|unauthenticated|No current user|UserUnAuthenticated/i.test(msg)
 }
 
 export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
@@ -199,7 +199,9 @@ export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
     const { data, errors } = await client.models.Document.list({ limit: 1000 })
     if (errors?.length) {
       const msg = errors[0].message || 'Document list failed'
-      state.lastError = isDocsAuthError(msg) ? null : msg
+      state.lastError = isDocsAuthError(msg)
+        ? 'Sign in to view and upload team attachments. Files are stored in Amplify Storage, not on this device.'
+        : msg
       emit()
       return
     }
@@ -217,7 +219,9 @@ export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
     console.log('[documentsStore] hydrated', docs.length)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    state.lastError = isDocsAuthError(msg) ? null : msg
+    state.lastError = isDocsAuthError(msg)
+      ? 'Sign in to view and upload team attachments. Files are stored in Amplify Storage, not on this device.'
+      : msg
     console.warn('[documentsStore] hydrate failed — using local cache', err)
     emit()
   }

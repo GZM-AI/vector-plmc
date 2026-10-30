@@ -1,6 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Amplify } from 'aws-amplify'
+import { Hub } from 'aws-amplify/utils'
 import { generateClient } from 'aws-amplify/data'
 import './index.css'
 import App from './App.tsx'
@@ -45,6 +46,12 @@ async function boot() {
     await hydrateSuppliersStoreFromCloud()
     await hydrateDocumentsStoreFromCloud()
     await hydrateResearchStoreFromCloud()
+
+    Hub.listen('auth', ({ payload }) => {
+      if (payload.event === 'signedIn' || payload.event === 'tokenRefresh') {
+        void hydrateDocumentsStoreFromCloud()
+      }
+    })
   } catch (err) {
     console.warn(
       'PLM Console — Amplify not fully configured; app will use local cache only.',
