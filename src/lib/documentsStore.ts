@@ -603,21 +603,43 @@ export async function getDocumentDownloadUrl(doc: Document): Promise<string> {
   }
 }
 
+async function mutateDocument(
+  run: (mode: 'apiKey' | 'userPool') => Promise<{ errors?: { message?: string }[] | null }>
+): Promise<void> {
+  const modes: Array<'apiKey' | 'userPool'> = ['apiKey', 'userPool']
+  let last = 'Delete failed'
+  for (const mode of modes) {
+    try {
+      const { errors } = await run(mode)
+      if (!errors?.length) return
+      last = errors[0].message || last
+      if (!isDocsAuthError(last)) break
+    } catch (err) {
+      last = err instanceof Error ? err.message : String(err)
+      if (!isDocsAuthError(last)) break
+    }
+  }
+  throw new Error(
+    isDocsAuthError(last)
+      ? 'Could not delete this attachment. Sign in, then try again.'
+      : last
+  )
+}
+
 export async function unlinkDocumentFromEntity(documentId: string, entityId: string): Promise<void> {
   const existing = state.documents.find((d) => d.id === documentId)
   if (!existing) return
   const linked = existing.linkedEntityIds.filter((id) => id !== entityId)
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
-  const mode = (await signedIn()) ? 'userPool' : 'apiKey'
-  const client = dataClient(mode)
-  const { errors } = await client.models.Document.update({
-    id: documentId,
-    linkedEntityIdsJson: JSON.stringify(linked),
-    lastModified: now,
-    modifiedBy,
-  })
-  if (errors?.length) throw new Error(errors[0].message || 'Unlink failed')
+  await mutateDocument((mode) =>
+    dataClient(mode).models.Document.update({
+      id: documentId,
+      linkedEntityIdsJson: JSON.stringify(linked),
+      lastModified: now,
+      modifiedBy,
+    })
+  )
   state.documents = state.documents.map((d) =>
     d.id === documentId ? { ...d, linkedEntityIds: linked, lastModified: now, modifiedBy } : d
   )
@@ -626,16 +648,14 @@ export async function unlinkDocumentFromEntity(documentId: string, entityId: str
 
 export async function deleteDocument(documentId: string): Promise<void> {
   const existing = state.documents.find((d) => d.id === documentId)
-  const client = dataClient()
-  if (existing?.storageKey) {
+  if (existing?.storageKey && !existing.storageKey.startsWith('local:')) {
     try {
       await removeStorage({ path: existing.storageKey })
     } catch (err) {
       console.warn('[documentsStore] storage delete failed', err)
     }
   }
-  const { errors } = await client.models.Document.delete({ id: documentId })
-  if (errors?.length) throw new Error(errors[0].message || 'Delete failed')
+  await mutateDocument((mode) => dataClient(mode).models.Document.delete({ id: documentId }))
   state.documents = state.documents.filter((d) => d.id !== documentId)
   emit()
 }

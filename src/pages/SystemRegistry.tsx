@@ -60,6 +60,7 @@ import {
   previewAttachedDocument,
   type DocumentPreview,
   unlinkDocumentFromEntity,
+  deleteDocument,
   hydrateDocumentsStoreFromCloud,
   getDocumentsError,
 } from '../lib/documentsStore';
@@ -1607,12 +1608,18 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   </button>
                   <button
                     type="button"
-                    title="Unlink from this entity"
+                    title="Delete attachment"
                     onClick={async () => {
+                      setAttachErr(null);
                       try {
-                        await unlinkDocumentFromEntity(d.id, entity.id);
+                        await deleteDocument(d.id);
                       } catch (err) {
-                        setAttachErr(err instanceof Error ? err.message : String(err));
+                        const msg = err instanceof Error ? err.message : String(err);
+                        setAttachErr(
+                          /unauthorized|not authorized|unauthenticated/i.test(msg)
+                            ? 'Could not delete this attachment. Sign in, then try again.'
+                            : msg
+                        );
                       }
                     }}
                     className="p-1.5 rounded-lg text-zinc-500 hover:text-red-300 hover:bg-zinc-900"
