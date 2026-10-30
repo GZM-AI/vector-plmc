@@ -4,8 +4,8 @@ import { type ClientSchema, a, defineData } from '@aws-amplify/backend';
  * Vector PLM — Amplify Data
  * MapLayout + Registry spine + Change Control + Documents + Suppliers + Research
  *
- * Document model: authenticated only (no publicApiKey).
- * Other models keep publicApiKey for current team workflow.
+ * Document model: apiKey + authenticated (same as the rest of the team models).
+ * Card load lists with apiKey so it does not show Unauthorized.
  */
 const schema = a.schema({
   MapLayout: a
@@ -159,6 +159,7 @@ const schema = a.schema({
     })
     .identifier(['id'])
     .authorization((allow) => [
+      allow.publicApiKey().to(['read', 'create', 'update', 'delete']),
       allow.authenticated().to(['read', 'create', 'update', 'delete']),
     ]),
 

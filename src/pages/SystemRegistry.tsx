@@ -1521,11 +1521,13 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             }}
           />
         </div>
-        {(attachErr || getDocumentsError()) && (
-          <p className="text-xs text-amber-300/90 mb-2">
-            {attachErr || getDocumentsError()}
-          </p>
+        {attachErr && (
+          <p className="text-xs text-amber-300/90 mb-2">{attachErr}</p>
         )}
+        {getDocumentsError() &&
+          !/unauthorized|not authorized|unauthenticated/i.test(getDocumentsError() || '') && (
+            <p className="text-xs text-red-400 mb-2">{getDocumentsError()}</p>
+          )}
         {linkedDocs.length === 0 ? (
           <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
             No attachments yet. Files are stored in team Amplify Storage (shared across signed-in users).

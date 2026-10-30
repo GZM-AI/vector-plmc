@@ -188,40 +188,53 @@ function isDocsAuthError(msg: string): boolean {
 
 export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
   try {
-    const authed = await signedIn()
-    if (!authed) {
-      state.hydrated = true
-      if (state.lastError && isDocsAuthError(state.lastError)) state.lastError = null
-      emit()
-      return
+    const modes: Array<'apiKey' | 'userPool'> = ['apiKey', 'userPool']
+    let lastAuthMsg = ''
+    for (const mode of modes) {
+      try {
+        const client = dataClient(mode)
+        const { data, errors } = await client.models.Document.list({ limit: 1000 })
+        if (errors?.length) {
+          const msg = errors[0].message || 'Document list failed'
+          if (isDocsAuthError(msg)) {
+            lastAuthMsg = msg
+            continue
+          }
+          state.lastError = msg
+          emit()
+          return
+        }
+        const docs = (data || [])
+          .map((row) => fromRow(row as unknown as Record<string, unknown>))
+          .filter((d): d is Document => !!d)
+        const byId = new Map(docs.map((d) => [d.id, d]))
+        for (const local of state.documents) {
+          if (!byId.has(local.id)) byId.set(local.id, local)
+        }
+        state.documents = [...byId.values()]
+        state.hydrated = true
+        state.lastError = null
+        emit()
+        console.log('[documentsStore] hydrated', mode, docs.length)
+        return
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        if (isDocsAuthError(msg)) {
+          lastAuthMsg = msg
+          continue
+        }
+        throw err
+      }
     }
-    const client = dataClient('userPool')
-    const { data, errors } = await client.models.Document.list({ limit: 1000 })
-    if (errors?.length) {
-      const msg = errors[0].message || 'Document list failed'
-      state.lastError = isDocsAuthError(msg)
-        ? 'Sign in to view and upload team attachments. Files are stored in Amplify Storage, not on this device.'
-        : msg
-      emit()
-      return
-    }
-    const docs = (data || [])
-      .map((row) => fromRow(row as unknown as Record<string, unknown>))
-      .filter((d): d is Document => !!d)
-    const byId = new Map(docs.map((d) => [d.id, d]))
-    for (const local of state.documents) {
-      if (!byId.has(local.id)) byId.set(local.id, local)
-    }
-    state.documents = [...byId.values()]
+    // Card load must not show "unauthorized". Auth failures stay quiet;
+    // upload still requires a signed-in user for Storage.
     state.hydrated = true
     state.lastError = null
+    if (lastAuthMsg) console.warn('[documentsStore] list unauthorized — hiding on card load', lastAuthMsg)
     emit()
-    console.log('[documentsStore] hydrated', docs.length)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
-    state.lastError = isDocsAuthError(msg)
-      ? 'Sign in to view and upload team attachments. Files are stored in Amplify Storage, not on this device.'
-      : msg
+    state.lastError = isDocsAuthError(msg) ? null : msg
     console.warn('[documentsStore] hydrate failed — using local cache', err)
     emit()
   }
