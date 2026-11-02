@@ -7,6 +7,8 @@ type Platform3DViewerProps = {
   modelSrc: string;
   label?: string;
   className?: string;
+  /** 1 = default. Lower for brighter models (e.g. S-TAR). */
+  lightScale?: number;
 };
 
 class ViewerErrorBoundary extends Component<
@@ -50,7 +52,6 @@ function looksLikeGlb(buf: ArrayBuffer): boolean {
   return view.getUint32(0, true) === 0x46546c67;
 }
 
-/** Clone and scale so the largest dimension fills the stage. */
 function Model({ src }: { src: string }) {
   const { scene } = useGLTF(src);
   const prepared = useMemo(() => {
@@ -71,11 +72,12 @@ function Model({ src }: { src: string }) {
   return <primitive object={prepared} />;
 }
 
-export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3DViewerProps) {
+export function Platform3DViewer({ modelSrc, label, className = '', lightScale = 1 }: Platform3DViewerProps) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
   const safeSrc = toStringSrc(modelSrc);
+  const k = lightScale;
 
   useEffect(() => {
     let cancelled = false;
@@ -130,10 +132,10 @@ export function Platform3DViewer({ modelSrc, label, className = '' }: Platform3D
             gl={{ antialias: true, alpha: false }}
           >
             <color attach="background" args={['#09090b']} />
-            <ambientLight intensity={1.05} />
-            <directionalLight position={[6, 10, 6]} intensity={1.8} />
-            <directionalLight position={[-5, 4, -3]} intensity={0.75} />
-            <directionalLight position={[0, 2, 8]} intensity={0.55} />
+            <ambientLight intensity={1.05 * k} />
+            <directionalLight position={[6, 10, 6]} intensity={1.8 * k} />
+            <directionalLight position={[-5, 4, -3]} intensity={0.75 * k} />
+            <directionalLight position={[0, 2, 8]} intensity={0.55 * k} />
             <Suspense fallback={null}>
               <Bounds fit clip observe margin={0.7}>
                 <Center>
