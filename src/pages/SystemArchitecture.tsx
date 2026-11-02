@@ -607,6 +607,7 @@ const SystemArchitecture: React.FC = () => {
                   modelSrc={modelSrc}
                   label={activeSystem?.name || 'TAR™'}
                   className="w-full"
+                  lightScale={activeSystem?.id === 'sys-star' ? 0.62 : 1}
                 />
               ) : (
                 <div className="flex items-center justify-center p-6 text-center text-sm text-zinc-300" style={{ minHeight: 480 }}>
