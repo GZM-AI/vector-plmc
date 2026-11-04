@@ -87,6 +87,40 @@ const KIND_META: Record<
   },
 };
 
+/** Short scannable label: type · entity · cleaned intent. Avoids dumping the raw prompt. */
+function buildSummary(kind: string, entityName?: string | null, query?: string | null): string {
+  const raw = (query || '').replace(/\s+/g, ' ').trim();
+  let intent = raw
+    .replace(/^(please |can you |could you |would you |i need |we need |research |look into |find |search for )/i, '')
+    .replace(/[?!.]+$/, '')
+    .trim();
+  if (intent.length > 64) {
+    const cut = intent.lastIndexOf(' ', 64);
+    intent = (cut > 24 ? intent.slice(0, cut) : intent.slice(0, 64)).trim() + '…';
+  }
+  const parts: string[] = [];
+  if (kind) parts.push(kind);
+  if (entityName) parts.push(entityName);
+  if (intent) parts.push(intent);
+  return parts.join(' · ').slice(0, 140) || 'Research run';
+}
+
+/** Old runs stored the raw query as title. Detect those so the list can show a summary instead. */
+function isRawQueryTitle(run: ResearchRun): boolean {
+  const t = (run.title || '').replace(/\s+/g, ' ').trim();
+  const q = (run.query || '').replace(/\s+/g, ' ').trim();
+  if (!t) return true;
+  if (t === q) return true;
+  if (q.startsWith(t)) return true;
+  if (t === q.slice(0, 120) || t === q.slice(0, 160)) return true;
+  return false;
+}
+
+function listLabel(run: ResearchRun): string {
+  if (!isRawQueryTitle(run)) return run.title;
+  return buildSummary(run.kind, run.entityName, run.query);
+}
+
 const DeepResearch: React.FC = () => {
   const [searchParams] = useSearchParams();
   const [provider, setProvider] = useState<ResearchProvider>('grok');
@@ -279,7 +313,7 @@ const DeepResearch: React.FC = () => {
           : null,
       });
       setResult(text);
-      setSaveTitle(query.trim().slice(0, 120));
+      setSaveTitle(buildSummary(KIND_META[kind].label, selectedEntity?.name, query));
     } catch (e: any) {
       setError(e?.message || String(e));
     } finally {
@@ -293,7 +327,7 @@ const DeepResearch: React.FC = () => {
     setSaveMsg(null);
     try {
       const run = await saveResearchRun({
-        title: saveTitle || query.trim(),
+        title: (saveTitle || buildSummary(KIND_META[kind].label, selectedEntity?.name, query)).trim(),
         query: query.trim(),
         resultText: result,
         kind: KIND_META[kind].label,
@@ -318,7 +352,7 @@ const DeepResearch: React.FC = () => {
     setOpenRunId(run.id);
     setQuery(run.query);
     setResult(run.resultText);
-    setSaveTitle(run.title);
+    setSaveTitle(listLabel(run));
     setProvider(run.provider);
     setModelId(run.modelId);
     if (['company', 'product', 'cost', 'manufacturing', 'open'].includes(run.kindId)) {
@@ -338,7 +372,7 @@ const DeepResearch: React.FC = () => {
     const inferred = defaultSubsystemId(run.entityId);
     if (inferred && !attachSubsystemId) setAttachSubsystemId(inferred);
     setError(null);
-    setSaveMsg(`Opened “${run.title}”`);
+    setSaveMsg(`Opened “${listLabel(run)}”`);
   };
 
   return (
@@ -551,7 +585,7 @@ const DeepResearch: React.FC = () => {
                     onClick={() => openRun(run)}
                     className="w-full text-left"
                   >
-                    <div className="text-sm text-zinc-200 truncate">{run.title}</div>
+                    <div className="text-sm text-zinc-200 truncate">{listLabel(run)}</div>
                     <div className="text-[10px] text-zinc-500 mt-1 flex flex-wrap gap-x-2 gap-y-0.5">
                       <span>{run.modelLabel}</span>
                       <span>· {run.kind}</span>
@@ -590,7 +624,7 @@ const DeepResearch: React.FC = () => {
                       type="button"
                       title="Delete saved run"
                       onClick={() => {
-                        if (window.confirm(`Delete “${run.title}”?`)) {
+                        if (window.confirm(`Delete “${listLabel(run)}”?`)) {
                           void deleteResearchRun(run.id);
                           if (openRunId === run.id) setOpenRunId(null);
                         }
@@ -640,6 +674,18 @@ const DeepResearch: React.FC = () => {
                 className="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-blue-500 resize-y"
               />
             </div>
+            {result && (
+              <div className="mb-4">
+                <label className="block text-[11px] text-zinc-500 mb-1">Summary (shown in Saved runs)</label>
+                <input
+                  type="text"
+                  value={saveTitle}
+                  onChange={(e) => setSaveTitle(e.target.value)}
+                  placeholder="Short summary of what this search was for"
+                  className="w-full bg-zinc-950 border border-zinc-700 rounded-2xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            )}
             <div className="flex flex-wrap gap-3 mb-5">
               <button
                 type="button"
@@ -789,3 +835,4 @@ const DeepResearch: React.FC = () => {
 };
 
 export default DeepResearch;
+
