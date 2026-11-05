@@ -71,6 +71,17 @@ export function documentsForEntity(entityId: string): Document[] {
   return state.documents.filter((d) => d.linkedEntityIds.includes(entityId))
 }
 
+/** Marker stored on the Document so the card reference image is distinct from other attachments. */
+export const REFERENCE_IMAGE_MARKER = '[[reference-image]]'
+
+export function isReferenceImage(doc: Document): boolean {
+  return (doc.description || '').includes(REFERENCE_IMAGE_MARKER)
+}
+
+export function referenceImageFor(entityId: string): Document | undefined {
+  return documentsForEntity(entityId).find(isReferenceImage)
+}
+
 export function getDocumentsError(): string | null {
   return state.lastError
 }
@@ -712,3 +723,4 @@ export async function deleteDocument(documentId: string): Promise<void> {
   state.lastError = null
   emit()
 }
+
