@@ -163,6 +163,7 @@ export function ensureSupplierForPart(opts: {
   subsystemId?: string;
   notes?: string;
   existingId?: string;
+  kind?: SupplierKind;
 }): Supplier {
   const name = opts.name.trim();
   let s =
@@ -172,7 +173,7 @@ export function ensureSupplierForPart(opts: {
   if (!s) {
     return upsertSupplier({
       name,
-      kind: 'Integrator',
+      kind: opts.kind || 'Integrator',
       engagement: 'Identified',
       notes: opts.notes,
       entityIds: [opts.entityId],
