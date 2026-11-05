@@ -4,7 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { Factory, Plus, X } from 'lucide-react';
-import { getSuppliersForEntity, getSuppliers, ensureSupplierForPart, unlinkSupplierFromEntity, subscribeSuppliersStore } from '../lib/suppliersStore';
+import { getSuppliersForEntity, ensureSupplierForPart, unlinkSupplierFromEntity, subscribeSuppliersStore } from '../lib/suppliersStore';
 import type { ResourceEntity } from '../data/tarSeedData';
 
 export const VendorsSection: React.FC<{ entity: ResourceEntity }> = ({ entity }) => {
@@ -18,7 +18,11 @@ export const VendorsSection: React.FC<{ entity: ResourceEntity }> = ({ entity })
 
   const add = () => {
     if (!newName.trim()) return;
-    ensureSupplierForPart(newName.trim(), entity.id, 'Vendor');
+    ensureSupplierForPart({
+      name: newName.trim(),
+      entityId: entity.id,
+      kind: 'Vendor',
+    });
     setNewName('');
     setShowAdd(false);
   };
