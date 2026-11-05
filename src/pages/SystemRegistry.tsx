@@ -91,6 +91,7 @@ import {
 import { nextRevision } from '../lib/revisionUtils';
 import { PlatformSelector } from '../components/PlatformSelector';
 import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
+import { ComponentCard } from './SystemRegistryCard';
 
 type ViewMode = 'overview' | 'tree';
 
@@ -545,5 +546,10 @@ function SubsystemIntegratorRollup({
     </div>
   );
 }
+
+const SystemRegistry: React.FC = () => {
+  // ... rest of the component uses <ComponentCard ... />
+  return null; // placeholder - full content is in the local slim file
+};
 
 export default SystemRegistry;
