@@ -63,6 +63,9 @@ import {
   deleteDocument,
   hydrateDocumentsStoreFromCloud,
   getDocumentsError,
+  getDocumentDownloadUrl,
+  referenceImageFor,
+  REFERENCE_IMAGE_MARKER,
 } from '../lib/documentsStore';
 import type { Document, ReleaseStatus, RevisionRecord, ElementKind } from '../types/plm';
 import {
@@ -570,6 +573,153 @@ function SubsystemIntegratorRollup({
   );
 }
 
+function ReferenceThumb({ entityId, className }: { entityId: string; className?: string }) {
+  const [tick, setTick] = useState(0);
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => subscribeDocumentsStore(() => setTick((t) => t + 1)), []);
+  const current = useMemo(() => referenceImageFor(entityId), [entityId, tick]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!current) {
+      setUrl(null);
+      return;
+    }
+    void getDocumentDownloadUrl(current)
+      .then((u) => {
+        if (!cancelled) setUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [current?.id, current?.storageKey]);
+  if (!url) return null;
+  return (
+    <img
+      src={url}
+      alt=""
+      className={className || 'w-8 h-8 rounded-lg object-cover border border-zinc-700 shrink-0'}
+    />
+  );
+}
+
+function ReferenceImageSlot({ entityId }: { entityId: string }) {
+  const [tick, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => subscribeDocumentsStore(() => setTick((t) => t + 1)), []);
+  const doc = useMemo(() => referenceImageFor(entityId), [entityId, tick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!doc) {
+      setUrl(null);
+      return;
+    }
+    void getDocumentDownloadUrl(doc)
+      .then((u) => {
+        if (!cancelled) setUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc?.id, doc?.storageKey]);
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErr('Choose an image file (PNG, JPG, WEBP, …).');
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const prev = referenceImageFor(entityId);
+      if (prev) await deleteDocument(prev.id);
+      await attachDocumentToEntity(entityId, file, {
+        name: file.name.replace(/\\.[^.]+$/, '') || 'Reference image',
+        kind: 'photo',
+        description: REFERENCE_IMAGE_MARKER,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="bg-zinc-950 border border-zinc-800 rounded-2xl p-4">
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h4 className="text-[11px] font-medium uppercase tracking-wider text-zinc-400 flex items-center gap-2">
+          <Image size={13} /> Reference image
+        </h4>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            className="text-[11px] px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400 disabled:opacity-40"
+          >
+            {busy ? 'Uploading…' : doc ? 'Replace' : 'Upload image'}
+          </button>
+          {doc && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setErr(null);
+                void deleteDocument(doc.id)
+                  .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setBusy(false));
+              }}
+              className="text-[11px] px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-700 text-zinc-400 hover:text-red-300 disabled:opacity-40"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+      </div>
+      {url ? (
+        <img
+          src={url}
+          alt="Component reference"
+          className="w-full max-h-72 object-contain rounded-xl bg-black/40 border border-zinc-800"
+        />
+      ) : (
+        <button
+          type="button"
+          onClick={() => inputRef.current?.click()}
+          className="w-full h-36 rounded-xl border border-dashed border-zinc-700 text-zinc-500 text-sm hover:border-zinc-500 hover:text-zinc-300"
+        >
+          No image yet. Upload a photo for visual reference.
+        </button>
+      )}
+      {err && <p className="text-xs text-amber-300 mt-2">{err}</p>}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          void onFile(file);
+        }}
+      />
+    </div>
+  );
+}
+
 interface ComponentCardProps {
   entity: ResourceEntity;
   onSelectRelated?: (id: string) => void;
@@ -634,7 +784,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   };
 
   const linkedDocs: Document[] = useMemo(
-    () => documentsForEntity(entity.id),
+    () => documentsForEntity(entity.id).filter((d) => !(d.description || '').includes(REFERENCE_IMAGE_MARKER)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [entity.id, docsTick]
   );
@@ -1028,6 +1178,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </div>
         </div>
       </div>
+
+      <ReferenceImageSlot entityId={entity.id} />
 
       {canRemoveSelf && pendingRemoveId === entity.id && (
         <div className="bg-red-950/30 border border-red-800/50 rounded-2xl px-4 py-3 flex flex-wrap items-center justify-between gap-3">
@@ -2180,6 +2332,7 @@ const SubsystemOverviewCard: React.FC<{
       <button type="button" onClick={() => onOpen(sub.id)} className="text-left group mb-3">
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
+            <ReferenceThumb entityId={sub.id} className="w-10 h-10 rounded-lg object-cover border border-zinc-700 shrink-0" />
             <Layers size={18} className="text-violet-400 shrink-0" />
             <h3 className="text-base font-semibold text-white group-hover:text-blue-300 leading-snug">
               {sub.name}
@@ -2285,6 +2438,7 @@ const SubsystemOverviewCard: React.FC<{
                   onClick={() => onOpen(child.id)}
                   className="flex-1 min-w-0 text-left flex items-center gap-2 px-1.5 py-1"
                 >
+                  <ReferenceThumb entityId={c.id} className="w-6 h-6 rounded object-cover border border-zinc-700 shrink-0" />
                   <span className="shrink-0" title={typeBadge(c)}>
                     {nodeTypeIcon(c, 14)}
                   </span>
@@ -2655,3 +2809,4 @@ const SystemRegistry: React.FC = () => {
 };
 
 export default SystemRegistry;
+
