@@ -1,8 +1,9 @@
 import { defineAuth } from '@aws-amplify/backend';
 
 /**
- * Minimal auth so Data can use userPool / identity.
- * Vector UI can stay on auth bypass until you wire Authenticator.
+ * Vector / shared team auth — email login.
+ * Authenticator forces sign-in (ITAR-adjacent documents).
+ * After pool deletion: sandbox recreates a new User Pool.
  */
 export const auth = defineAuth({
   loginWith: {

@@ -8,8 +8,13 @@ import { Package } from 'lucide-react';
 import { getRegistryTree, getEntityById, subscribeConfigStore } from '../lib/configStore';
 import { PlatformSelector } from '../components/PlatformSelector';
 import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
+<<<<<<< Updated upstream
 import { ComponentCard } from './SystemRegistryCard';
 import { TreeNode } from './SystemRegistryTree';
+=======
+import { RequirementsSection } from './RequirementsSection';
+import { VendorsSection } from './VendorsSection';
+>>>>>>> Stashed changes
 
 type ViewMode = 'overview' | 'tree';
 
