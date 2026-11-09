@@ -873,6 +873,7 @@ export function addChildEntity(
   saveLocal(state);
   notify();
   void upsertExtraEntityCloud(entity);
+  scheduleAutoPushToCloud();
   return applyOverlay(entity);
 }
 
@@ -914,6 +915,7 @@ export function removeChildEntity(entityId: string): ResourceEntity | null {
   saveLocal(state);
   notify();
   persistRemovedIdsCloud();
+  scheduleAutoPushToCloud();
   extrasToDelete.forEach((id) => {
     void deleteExtraEntityCloud(id);
   });
@@ -1117,6 +1119,7 @@ export function createBaseline(input: {
   saveLocal(state);
   notify();
   void createBaselineCloud(baseline);
+  scheduleAutoPushToCloud();
   return baseline;
 }
 
