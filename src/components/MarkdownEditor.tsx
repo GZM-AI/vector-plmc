@@ -84,9 +84,14 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       }
 
       el.value = newValue;
-      el.focus();
-      el.setSelectionRange(newStart, newEnd);
       notify(newValue);
+      // Restore selection after the parent re-render settles
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(newStart, newEnd);
+        }
+      });
     },
     [notify, disabled]
   );
@@ -114,9 +119,13 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       }
 
       el.value = newValue;
-      el.focus();
-      el.setSelectionRange(newPos, newPos);
       notify(newValue);
+      requestAnimationFrame(() => {
+        if (textareaRef.current) {
+          textareaRef.current.focus();
+          textareaRef.current.setSelectionRange(newPos, newPos);
+        }
+      });
     },
     [notify, disabled]
   );
