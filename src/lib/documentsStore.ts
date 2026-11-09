@@ -183,7 +183,7 @@ function fromRow(row: Record<string, unknown>): Document | null {
 }
 
 function safeFileName(name: string): string {
-  const base = name.replace(/[/\\?%*:|\"<>]/g, '_').trim() || 'file'
+  const base = name.replace(/[/\\?%*:|"<>]/g, '_').trim() || 'file'
   return base.slice(0, 180)
 }
 
@@ -313,6 +313,9 @@ export async function attachDocumentToEntity(
 
   const id = `doc-${crypto.randomUUID()}`
   const fileName = safeFileName(file.name)
+  // Card files live in attachments/, not next to the platform GLBs under models/.
+  // AWS-USER-POOL-authenticated must allow s3:PutObject on attachments/* (same
+  // kind of inline policy as VectorModelsAccess on models/*).
   const storageKey = `attachments/${id}/${fileName}`
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
@@ -466,10 +469,10 @@ export type DocumentPreview = {
 
 function decodeXmlEntities(s: string): string {
   return s
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '\"')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
 }
 
@@ -514,8 +517,8 @@ function lineToBlock(line: string, style?: string): PreviewBlock {
     return { type: 'h2', text: raw.replace(/^##\s+/, '') }
   if (style === 'Heading3' || /^###\s+/.test(raw))
     return { type: 'h3', text: raw.replace(/^###\s+/, '') }
-  if (/^\s*([-*\u2022]|\d+\.)\s+/.test(raw))
-    return { type: 'li', text: raw.replace(/^\s*([-*\u2022]|\d+\.)\s+/, '') }
+  if (/^\s*([-*•]|\d+\.)\s+/.test(raw))
+    return { type: 'li', text: raw.replace(/^\s*([-*•]|\d+\.)\s+/, '') }
   return { type: 'p', text: raw }
 }
 
@@ -582,24 +585,93 @@ export async function previewAttachedDocument(doc: Document): Promise<DocumentPr
     mime.includes('officedocument') ||
     name.endsWith('.docx')
   ) {
-    // truncated for brevity in this push — full file continues in next update if needed
-    return { title, fileName: doc.fileName, kind: 'file' }
+    const bytes = await urlToBytes(url)
+    const xml = zipStoreRead(bytes, 'word/document.xml')
+    if (xml) {
+      const blocks = docxXmlToBlocks(xml)
+      return {
+        title,
+        fileName: doc.fileName,
+        kind: 'article',
+        blocks,
+        text: blocks.map((b) => (b.type === 'blank' ? '' : b.text)).join('\n'),
+      }
+    }
+    return {
+      title,
+      fileName: doc.fileName,
+      kind: 'file',
+      text: 'This Word file cannot be previewed here. Use Download.',
+    }
   }
-  return { title, fileName: doc.fileName, kind: 'file' }
+  if (mime.startsWith('text/') || /\.(md|txt|csv|json)$/.test(name)) {
+    const bytes = await urlToBytes(url)
+    const raw = new TextDecoder().decode(bytes)
+    return {
+      title,
+      fileName: doc.fileName,
+      kind: 'article',
+      blocks: textToBlocks(raw),
+      text: raw,
+    }
+  }
+  return {
+    title,
+    fileName: doc.fileName,
+    kind: 'file',
+    text: 'No in-app preview for this file type. Use Download.',
+  }
+}
+
+export async function openAttachedDocument(doc: Document): Promise<void> {
+  const url = await getDocumentDownloadUrl(doc)
+  const name = doc.fileName || `${doc.name || 'attachment'}.docx`
+  if (url.startsWith('data:') || url.startsWith('blob:')) {
+    const href = url.startsWith('data:') ? dataUrlToBlobUrl(url) : url
+    const a = document.createElement('a')
+    a.href = href
+    a.download = name
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    if (href.startsWith('blob:')) setTimeout(() => URL.revokeObjectURL(href), 2000)
+    return
+  }
+  const opened = window.open(url, '_blank', 'noopener,noreferrer')
+  if (!opened) {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = name
+    a.target = '_blank'
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
 }
 
 export async function getDocumentDownloadUrl(doc: Document): Promise<string> {
-  if (doc.storageKey?.startsWith('local:')) {
-    const local = localBytesUrl(doc.id)
-    if (local) return local
-    throw new Error('Local file bytes are no longer available')
+  if (!doc.storageKey) throw new Error('This document has no file in storage.')
+  if (doc.storageKey.startsWith('local:')) {
+    const id = doc.storageKey.slice('local:'.length) || doc.id
+    const dataUrl = localBytesUrl(id) || localBytesUrl(doc.id)
+    if (!dataUrl) throw new Error('File is only on the machine that attached it.')
+    return dataUrl
   }
-  if (!doc.storageKey) throw new Error('No storage key')
-  const { url } = await getUrl({
-    path: doc.storageKey,
-    options: { bucket: 'vectorPlmDocuments' },
-  })
-  return url.toString()
+  try {
+    const { url } = await getUrl({
+      path: doc.storageKey,
+      options: { expiresIn: 300 },
+    })
+    return url.toString()
+  } catch {
+    const { url } = await getUrl({
+      path: doc.storageKey,
+      options: { expiresIn: 300 },
+    } as never)
+    return url.toString()
+  }
 }
 
 async function mutateDocument(
@@ -655,9 +727,7 @@ export async function deleteDocument(documentId: string): Promise<void> {
     }
   }
   try {
-    await mutateDocument((mode) =>
-      dataClient(mode).models.Document.delete({ id: documentId })
-    )
+    await mutateDocument((mode) => dataClient(mode).models.Document.delete({ id: documentId }))
   } catch (err) {
     console.warn('[documentsStore] Document.delete skipped', err)
   }
@@ -669,3 +739,4 @@ export async function deleteDocument(documentId: string): Promise<void> {
   state.lastError = null
   emit()
 }
+
