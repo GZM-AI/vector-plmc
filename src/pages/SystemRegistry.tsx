@@ -1383,7 +1383,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      {/* Phase 1 — Revision history */}
+      {/* Phase 1 — Revision history (hidden on platform System cards) */}
+      {entity.type !== 'System' && (
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-3 flex items-center gap-2">
           <History size={14} />
@@ -1505,6 +1506,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           </div>
         )}
       </div>
+      )}
 
       {/* Attachments — Amplify Storage + Document model (team-shared) */}
       <div>
