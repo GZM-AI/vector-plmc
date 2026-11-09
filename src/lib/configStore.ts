@@ -95,6 +95,7 @@ export type EntityOverlay = {
   description?: string;
   notes?: string;
   tags?: string[];
+  requirements?: string;
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
 };
@@ -262,6 +263,7 @@ async function pullFromCloud(): Promise<boolean> {
           description: row.description ?? undefined,
           notes: unpacked.notes ?? undefined,
           tags: unpacked.tags,
+          requirements: unpacked.requirements,
           structuralType:
             unpacked.structuralType || localPrev?.structuralType || undefined,
           kind: unpacked.kind || localPrev?.kind || undefined,
@@ -423,6 +425,7 @@ function packOverlayNotes(o: EntityOverlay): string | undefined {
   if (o.structuralType) meta.st = o.structuralType;
   if (o.kind) meta.k = o.kind;
   if (o.tags !== undefined) meta.tg = o.tags.join(',');
+  if (o.requirements !== undefined) meta.rq = o.requirements;
   if (!Object.keys(meta).length) return o.notes;
   return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
 }
@@ -433,18 +436,20 @@ function unpackOverlayNotes(raw: string | undefined | null): {
   kind?: ElementKind;
   supplierId?: string;
   tags?: string[];
+  requirements?: string;
 } {
   if (!raw) return {};
   const m = raw.match(PLM_META_RE);
   if (!m) return { notes: raw };
   try {
-    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string };
+    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string; rq?: string };
     return {
       notes: raw.slice(m[0].length) || undefined,
       structuralType: meta.st as StructuralEntityType | undefined,
       kind: meta.k as ElementKind | undefined,
       supplierId: meta.sid,
       tags: meta.tg !== undefined ? (meta.tg ? meta.tg.split(',').map((t) => t.trim()).filter(Boolean) : []) : undefined,
+      requirements: meta.rq,
     };
   } catch {
     return { notes: raw };
@@ -718,7 +723,8 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
     kind: o.kind !== undefined ? o.kind : entity.kind,
     ...(o.notes !== undefined ? { notes: o.notes } : {}),
     ...(o.tags !== undefined ? { tags: o.tags } : {}),
-  } as ResourceEntity & { notes?: string };
+    ...(o.requirements !== undefined ? { requirements: o.requirements } : {}),
+  } as ResourceEntity & { notes?: string; requirements?: string };
 }
 
 function isRemoved(id: string): boolean {
@@ -929,6 +935,7 @@ export function updateEntityFields(
     description?: string;
     notes?: string;
     tags?: string[];
+    requirements?: string;
     modifiedBy?: string;
     type?: StructuralEntityType;
     kind?: ElementKind;
@@ -973,6 +980,7 @@ export function updateEntityFields(
     description: fields.description !== undefined ? fields.description : prev?.description,
     notes: fields.notes !== undefined ? fields.notes : prev?.notes,
     tags: fields.tags !== undefined ? fields.tags : prev?.tags,
+    requirements: fields.requirements !== undefined ? fields.requirements : prev?.requirements,
     structuralType: fields.type !== undefined ? fields.type : prev?.structuralType,
     kind: fields.kind !== undefined ? fields.kind : prev?.kind,
   };
@@ -980,6 +988,7 @@ export function updateEntityFields(
   if (fields.description !== undefined) nextOverlay.description = fields.description;
   if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
   if (fields.tags !== undefined) nextOverlay.tags = fields.tags;
+  if (fields.requirements !== undefined) nextOverlay.requirements = fields.requirements;
   if (fields.type !== undefined) nextOverlay.structuralType = fields.type;
   if (fields.kind !== undefined) nextOverlay.kind = fields.kind;
 
