@@ -82,6 +82,7 @@ import {
   getEntityById,
   isEntityDirty,
   decodeChangesSummary,
+  uploadLocalConfigToCloud,
   type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision, isUnversioned, isFormalVersion, UNVERSIONED } from '../lib/revisionUtils';
@@ -2522,6 +2523,18 @@ const SystemRegistry: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap gap-3 items-center">
+          <button
+            type="button"
+            onClick={async () => {
+              const r = await uploadLocalConfigToCloud();
+              console.log('[configStore] manual push', r);
+              alert(r.ok ? `Pushed local Registry data to cloud. ${r.message}` : `Push failed: ${r.message}`);
+            }}
+            className="px-4 py-2 rounded-xl text-sm bg-amber-600 hover:bg-amber-500 text-white"
+            title="Push this browser's local Registry edits to the cloud so other devices see them"
+          >
+            Push local to cloud
+          </button>
           <div className="flex bg-zinc-900 border border-zinc-700 rounded-2xl p-1">
             <button
               type="button"
