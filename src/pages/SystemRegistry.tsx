@@ -1391,7 +1391,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       <ReferenceImageSlot entityId={entity.id} />
 
       <div>
-        <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
+        <h4 className="text-lg font-medium text-blue-400 mb-2">Description</h4>
         {editing ? (
           <MarkdownEditor
             value={draftDescription}
@@ -1408,7 +1408,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       </div>
 
       <div>
-        <h4 className="text-sm font-medium text-blue-400 mb-2">Notes</h4>
+        <h4 className="text-lg font-medium text-blue-400 mb-2">Notes</h4>
         {editing ? (
           <MarkdownEditor
             value={draftNotes}
