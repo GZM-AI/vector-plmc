@@ -34,6 +34,7 @@ import {
   Trash2,
   Download,
   X,
+  Image,
 } from 'lucide-react';
 import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childOrderStore';
 import {
@@ -60,6 +61,10 @@ import {
   unlinkDocumentFromEntity,
   hydrateDocumentsStoreFromCloud,
   getDocumentsError,
+  getDocumentDownloadUrl,
+  deleteDocument,
+  referenceImageFor,
+  REFERENCE_IMAGE_MARKER,
 } from '../lib/documentsStore';
 import type { Document, ReleaseStatus, RevisionRecord, ElementKind } from '../types/plm';
 import {
@@ -435,6 +440,111 @@ const TreeNode: React.FC<TreeNodeProps> = ({
 };
 
 /** Read-only sourcing line: suppliers on components; integrator candidate on subsystems. */
+function ReferenceImageSlot({ entityId }: { entityId: string }) {
+  const [tick, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => subscribeDocumentsStore(() => setTick((t) => t + 1)), []);
+  const doc = useMemo(() => referenceImageFor(entityId), [entityId, tick]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!doc) {
+      setUrl(null);
+      return;
+    }
+    void getDocumentDownloadUrl(doc)
+      .then((u) => {
+        if (!cancelled) setUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc?.id, doc?.storageKey]);
+
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErr('Choose an image file (PNG, JPG, WEBP, …).');
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      const prev = referenceImageFor(entityId);
+      if (prev) await deleteDocument(prev.id);
+      await attachDocumentToEntity(entityId, file, {
+        name: file.name.replace(/\.[^.]+$/, '') || 'Reference image',
+        kind: 'photo',
+        description: REFERENCE_IMAGE_MARKER,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-3">
+      {url ? (
+        <img
+          src={url}
+          alt="Component reference"
+          className="h-20 w-28 object-cover rounded-lg border border-zinc-700 bg-black/40 shrink-0"
+        />
+      ) : null}
+      <div className="flex flex-col items-start gap-1">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-40"
+          >
+            <Image size={12} />
+            {busy ? 'Uploading…' : url ? 'Replace image' : 'Add image'}
+          </button>
+          {doc && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                setErr(null);
+                void deleteDocument(doc.id)
+                  .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setBusy(false));
+              }}
+              className="text-[11px] px-2 py-1 rounded-lg text-zinc-500 hover:text-red-300 disabled:opacity-40"
+            >
+              Remove
+            </button>
+          )}
+        </div>
+        {err && <p className="text-[11px] text-amber-300">{err}</p>}
+      </div>
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          void onFile(file);
+        }}
+      />
+    </div>
+  );
+}
+
 const RegistrySupplierLine: React.FC<{ entity: ResourceEntity }> = ({ entity }) => {
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -1267,6 +1377,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           )}
         </div>
       )}
+
+      <ReferenceImageSlot entityId={entity.id} />
 
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
