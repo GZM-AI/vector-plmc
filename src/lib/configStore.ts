@@ -312,32 +312,52 @@ async function pullFromCloud(): Promise<boolean> {
       createdAt: row.createdAt,
     }));
 
-    // Keep local-only records and push them up so local changes reach cloud by default.
-    // If both exist, prefer the one with the newer lastModified and push it.
-    // (hydrate prefers local-newer — 2026-11-09)
+    // Team sync: cloud is shared source of truth.
+    // Local-only records are pushed. If both exist, newer lastModified wins.
+    // A stale browser must not overwrite another team member's newer cloud edit.
+    // Local is backed up before this merge so unsynced work is recoverable.
     const local = state;
     const cloudOverlayIds = new Set(Object.keys(overlays));
     const cloudEntityIds = new Set(extraEntities.map((e) => e.id));
     const cloudHistoryIds = new Set(extraHistory.map((r) => r.id));
     const cloudBaselineIds = new Set(extraBaselines.map((b) => b.id));
 
-    // Local always wins for any id that exists locally. Never discard laptop edits.
     let pushedLocal = 0;
+    let tookCloud = 0;
     for (const [id, o] of Object.entries(local.overlays)) {
-      overlays[id] = o;
-      void upsertOverlayCloud(id, o);
-      pushedLocal++;
+      const cloud = overlays[id];
+      if (!cloud) {
+        overlays[id] = o;
+        void upsertOverlayCloud(id, o);
+        pushedLocal++;
+        continue;
+      }
+      const localTime = Date.parse(o.lastModified || '') || 0;
+      const cloudTime = Date.parse(cloud.lastModified || '') || 0;
+      if (localTime > cloudTime) {
+        overlays[id] = o;
+        void upsertOverlayCloud(id, o);
+        pushedLocal++;
+      } else {
+        tookCloud++;
+      }
     }
-    console.log('[configStore] hydrate kept and pushed', pushedLocal, 'local overlays');
+    console.log('[configStore] hydrate team merge', { pushedLocal, tookCloud });
     for (const e of local.extraEntities) {
       if (removedIds.includes(e.id)) continue;
       const cloudIdx = extraEntities.findIndex((c) => c.id === e.id);
       if (cloudIdx < 0) {
         extraEntities.push(e);
-      } else {
-        extraEntities[cloudIdx] = e;
+        void upsertExtraEntityCloud(e);
+        continue;
       }
-      void upsertExtraEntityCloud(e);
+      const cloud = extraEntities[cloudIdx];
+      const localTime = Date.parse(e.lastModified || '') || 0;
+      const cloudTime = Date.parse(cloud.lastModified || '') || 0;
+      if (localTime > cloudTime) {
+        extraEntities[cloudIdx] = e;
+        void upsertExtraEntityCloud(e);
+      }
     }
     for (const r of local.extraHistory) {
       if (!cloudHistoryIds.has(r.id)) {
@@ -629,7 +649,7 @@ export async function uploadLocalConfigToCloud(): Promise<{ ok: boolean; message
 
 // ─── Automatic cloud push (laptop → Amplify) ─────────────────────────────────
 // Debounced full upload after any local change, plus on tab hide.
-// Never overwrites local; hydrate keeps local and this only pushes.
+// Pushes this browser's current local state. Hydrate uses lastModified so a stale cache cannot clobber a newer team edit.
 
 let autoPushTimer: ReturnType<typeof setTimeout> | null = null;
 let autoPushInFlight = false;
@@ -670,10 +690,15 @@ async function runAutoPush(): Promise<void> {
 if (typeof window !== 'undefined') {
   window.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'hidden') void runAutoPush();
+    if (document.visibilityState === 'visible') void pullFromCloud();
   });
   window.addEventListener('pagehide', () => {
     void runAutoPush();
   });
+  // Team members see each other's cloud edits without a manual reload.
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') void pullFromCloud();
+  }, 45000);
 }
 
 // ─── Local merge API ─────────────────────────────────────────────────────────
