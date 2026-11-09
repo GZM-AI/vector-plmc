@@ -294,20 +294,29 @@ async function pullFromCloud(): Promise<boolean> {
     const cloudHistoryIds = new Set(extraHistory.map((r) => r.id));
     const cloudBaselineIds = new Set(extraBaselines.map((b) => b.id));
 
+    let pushedNewer = 0;
     for (const [id, o] of Object.entries(local.overlays)) {
       const cloud = overlays[id];
       if (!cloud) {
         overlays[id] = o;
         void upsertOverlayCloud(id, o);
+        pushedNewer++;
       } else {
         const localTime = Date.parse(o.lastModified || '') || 0;
         const cloudTime = Date.parse(cloud.lastModified || '') || 0;
-        if (localTime > cloudTime) {
+        const differs =
+          (o.name || '') !== (cloud.name || '') ||
+          (o.description || '') !== (cloud.description || '') ||
+          (o.notes || '') !== (cloud.notes || '') ||
+          JSON.stringify(o.tags || []) !== JSON.stringify(cloud.tags || []);
+        if (localTime > cloudTime || differs) {
           overlays[id] = o;
           void upsertOverlayCloud(id, o);
+          pushedNewer++;
         }
       }
     }
+    console.log('[configStore] hydrate pushed', pushedNewer, 'local-newer/different overlays');
     for (const e of local.extraEntities) {
       if (removedIds.includes(e.id)) continue;
       const cloudIdx = extraEntities.findIndex((c) => c.id === e.id);
