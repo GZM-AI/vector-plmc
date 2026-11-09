@@ -94,6 +94,7 @@ import { PlatformSelector } from '../components/PlatformSelector';
 import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
 import { RequirementsSection } from './RequirementsSection';
 import MarkdownEditor from '../components/MarkdownEditor';
+import MarkdownView from '../components/MarkdownView';
 import { VendorsSection } from './VendorsSection';
 
 type ViewMode = 'overview' | 'tree';
@@ -1400,9 +1401,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             rows={8}
           />
         ) : entity.description ? (
-          <div className="text-zinc-300 leading-relaxed text-[15px] whitespace-pre-wrap break-words">
-            {entity.description}
-          </div>
+          <MarkdownView text={entity.description} className="text-zinc-300 text-[15px]" />
         ) : (
           <p className="text-xs text-zinc-600">No description yet. Click Edit details to add one.</p>
         )}
@@ -1419,9 +1418,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             rows={6}
           />
         ) : (entity as ResourceEntity & { notes?: string }).notes ? (
-          <div className="text-zinc-300 leading-relaxed text-[15px] whitespace-pre-wrap break-words">
-            {(entity as ResourceEntity & { notes?: string }).notes}
-          </div>
+          <MarkdownView text={(entity as ResourceEntity & { notes?: string }).notes || ''} className="text-zinc-300 text-[15px]" />
         ) : (
           <p className="text-xs text-zinc-600">No notes yet.</p>
         )}
