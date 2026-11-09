@@ -491,13 +491,21 @@ function ReferenceImageSlot({ entityId }: { entityId: string }) {
     }
   };
 
+  const isPng =
+    (doc?.mimeType || '').toLowerCase().includes('png') ||
+    (doc?.fileName || doc?.name || '').toLowerCase().endsWith('.png');
+
   return (
     <div className="flex items-center gap-3">
       {url ? (
         <img
           src={url}
           alt="Component reference"
-          className="h-20 w-28 object-cover rounded-lg border border-zinc-700 bg-black/40 shrink-0"
+          className={
+            'min-w-[200px] w-[200px] h-auto max-h-64 object-contain rounded-lg border border-zinc-700 shrink-0 ' +
+            (isPng ? 'bg-transparent' : 'bg-black/40')
+          }
+          style={isPng ? { background: 'transparent' } : undefined}
         />
       ) : null}
       <div className="flex flex-col items-start gap-1">
