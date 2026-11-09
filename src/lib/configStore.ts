@@ -154,12 +154,38 @@ function loadLocal(): StoreState {
   }
 }
 
+const BACKUP_KEY = 'vector-plm-config-v1-backup';
+
 function saveLocal(s: StoreState): void {
   try {
     const { cloudHydrated: _, ...rest } = s;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
   } catch {
     /* ignore */
+  }
+}
+
+/** Keep the previous local cache so a hydrate cannot permanently erase laptop edits. */
+function backupLocalBeforeHydrate(): void {
+  try {
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current && current.length > 20) {
+      localStorage.setItem(BACKUP_KEY, current);
+      localStorage.setItem(BACKUP_KEY + '-at', new Date().toISOString());
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function restoreLocalFromBackup(): boolean {
+  try {
+    const backup = localStorage.getItem(BACKUP_KEY);
+    if (!backup) return false;
+    localStorage.setItem(STORAGE_KEY, backup);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -192,6 +218,7 @@ async function pullFromCloud(): Promise<boolean> {
     console.warn('[configStore] cloud pull skipped — no client / models');
     return false;
   }
+  backupLocalBeforeHydrate();
   try {
     const [ov, ex, rev, bl] = await Promise.all([
       client.models.ProductOverlay.list({ limit: 1000 }),
@@ -294,44 +321,23 @@ async function pullFromCloud(): Promise<boolean> {
     const cloudHistoryIds = new Set(extraHistory.map((r) => r.id));
     const cloudBaselineIds = new Set(extraBaselines.map((b) => b.id));
 
-    let pushedNewer = 0;
+    // Local always wins for any id that exists locally. Never discard laptop edits.
+    let pushedLocal = 0;
     for (const [id, o] of Object.entries(local.overlays)) {
-      const cloud = overlays[id];
-      if (!cloud) {
-        overlays[id] = o;
-        void upsertOverlayCloud(id, o);
-        pushedNewer++;
-      } else {
-        const localTime = Date.parse(o.lastModified || '') || 0;
-        const cloudTime = Date.parse(cloud.lastModified || '') || 0;
-        const differs =
-          (o.name || '') !== (cloud.name || '') ||
-          (o.description || '') !== (cloud.description || '') ||
-          (o.notes || '') !== (cloud.notes || '') ||
-          JSON.stringify(o.tags || []) !== JSON.stringify(cloud.tags || []);
-        if (localTime > cloudTime || differs) {
-          overlays[id] = o;
-          void upsertOverlayCloud(id, o);
-          pushedNewer++;
-        }
-      }
+      overlays[id] = o;
+      void upsertOverlayCloud(id, o);
+      pushedLocal++;
     }
-    console.log('[configStore] hydrate pushed', pushedNewer, 'local-newer/different overlays');
+    console.log('[configStore] hydrate kept and pushed', pushedLocal, 'local overlays');
     for (const e of local.extraEntities) {
       if (removedIds.includes(e.id)) continue;
       const cloudIdx = extraEntities.findIndex((c) => c.id === e.id);
       if (cloudIdx < 0) {
         extraEntities.push(e);
-        void upsertExtraEntityCloud(e);
       } else {
-        const cloud = extraEntities[cloudIdx];
-        const localTime = Date.parse(e.lastModified || '') || 0;
-        const cloudTime = Date.parse(cloud.lastModified || '') || 0;
-        if (localTime > cloudTime) {
-          extraEntities[cloudIdx] = e;
-          void upsertExtraEntityCloud(e);
-        }
+        extraEntities[cloudIdx] = e;
       }
+      void upsertExtraEntityCloud(e);
     }
     for (const r of local.extraHistory) {
       if (!cloudHistoryIds.has(r.id)) {
