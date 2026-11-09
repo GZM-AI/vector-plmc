@@ -1,4 +1,4 @@
-import React, { useRef, useLayoutEffect, useCallback } from "react";
+import React, { useRef, useEffect, useCallback } from "react";
 import { Bold, Underline, List, ListOrdered } from "lucide-react";
 
 interface MarkdownEditorProps {
@@ -21,17 +21,38 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
   rows = 6,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const pendingSelection = useRef<{ start: number; end: number } | null>(null);
+  const lastExternalValue = useRef(value);
+  const isInternalChange = useRef(false);
 
-  // Restore cursor after value updates from toolbar actions
-  useLayoutEffect(() => {
-    const el = textareaRef.current;
-    if (!el || !pendingSelection.current) return;
-    const { start, end } = pendingSelection.current;
-    el.focus();
-    el.setSelectionRange(start, end);
-    pendingSelection.current = null;
+  // Only sync from outside when the prop actually changes from an external source
+  // (e.g. switching entities), not from our own onChange
+  useEffect(() => {
+    if (isInternalChange.current) {
+      isInternalChange.current = false;
+      lastExternalValue.current = value;
+      return;
+    }
+    if (value !== lastExternalValue.current && textareaRef.current) {
+      const el = textareaRef.current;
+      const start = el.selectionStart;
+      const end = el.selectionEnd;
+      el.value = value;
+      // Restore selection if the element still has focus
+      if (document.activeElement === el) {
+        el.setSelectionRange(start, end);
+      }
+      lastExternalValue.current = value;
+    }
   }, [value]);
+
+  const notify = useCallback(
+    (newValue: string) => {
+      isInternalChange.current = true;
+      lastExternalValue.current = newValue;
+      onChange(newValue);
+    },
+    [onChange]
+  );
 
   const applyWrap = useCallback(
     (before: string, after: string) => {
@@ -39,11 +60,13 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       const el = textareaRef.current;
       const start = el.selectionStart;
       const end = el.selectionEnd;
-      const selected = value.substring(start, end);
+      const current = el.value;
+      const selected = current.substring(start, end);
 
-      // If selection is already wrapped by this marker, unwrap it
       const alreadyWrapped =
-        selected.startsWith(before) && selected.endsWith(after) && selected.length > before.length + after.length;
+        selected.startsWith(before) &&
+        selected.endsWith(after) &&
+        selected.length > before.length + after.length;
 
       let newValue: string;
       let newStart: number;
@@ -51,54 +74,60 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
 
       if (alreadyWrapped) {
         const inner = selected.slice(before.length, selected.length - after.length);
-        newValue = value.substring(0, start) + inner + value.substring(end);
+        newValue = current.substring(0, start) + inner + current.substring(end);
         newStart = start;
         newEnd = start + inner.length;
       } else {
-        newValue = value.substring(0, start) + before + selected + after + value.substring(end);
+        newValue = current.substring(0, start) + before + selected + after + current.substring(end);
         newStart = start + before.length;
         newEnd = start + before.length + selected.length;
       }
 
-      pendingSelection.current = { start: newStart, end: newEnd };
-      onChange(newValue);
+      el.value = newValue;
+      el.focus();
+      el.setSelectionRange(newStart, newEnd);
+      notify(newValue);
     },
-    [value, onChange, disabled]
+    [notify, disabled]
   );
-
-  const handleBold = () => applyWrap("**", "**");
-  const handleUnderline = () => applyWrap("<u>", "</u>");
 
   const prefixLine = useCallback(
     (prefix: string) => {
       if (disabled || !textareaRef.current) return;
       const el = textareaRef.current;
       const start = el.selectionStart;
-      const lineStart = value.lastIndexOf("\n", start - 1) + 1;
-      const line = value.slice(lineStart, value.indexOf("\n", lineStart) === -1 ? value.length : value.indexOf("\n", lineStart));
+      const current = el.value;
+      const lineStart = current.lastIndexOf("\n", start - 1) + 1;
+      const lineEndIdx = current.indexOf("\n", lineStart);
+      const lineEnd = lineEndIdx === -1 ? current.length : lineEndIdx;
+      const line = current.slice(lineStart, lineEnd);
 
-      // Toggle if already prefixed
+      let newValue: string;
+      let newPos: number;
+
       if (line.startsWith(prefix)) {
-        const newValue = value.slice(0, lineStart) + line.slice(prefix.length) + value.slice(lineStart + line.length);
-        pendingSelection.current = { start: start - prefix.length, end: start - prefix.length };
-        onChange(newValue);
+        newValue = current.slice(0, lineStart) + line.slice(prefix.length) + current.slice(lineEnd);
+        newPos = Math.max(lineStart, start - prefix.length);
       } else {
-        const newValue = value.slice(0, lineStart) + prefix + value.slice(lineStart);
-        pendingSelection.current = { start: start + prefix.length, end: start + prefix.length };
-        onChange(newValue);
+        newValue = current.slice(0, lineStart) + prefix + current.slice(lineStart);
+        newPos = start + prefix.length;
       }
+
+      el.value = newValue;
+      el.focus();
+      el.setSelectionRange(newPos, newPos);
+      notify(newValue);
     },
-    [value, onChange, disabled]
+    [notify, disabled]
   );
 
+  const handleBold = () => applyWrap("**", "**");
+  const handleUnderline = () => applyWrap("<u>", "</u>");
   const handleBullet = () => prefixLine("- ");
   const handleNumbered = () => prefixLine("1. ");
 
-  // Preserve cursor on normal typing as well (controlled input)
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const el = e.target;
-    pendingSelection.current = { start: el.selectionStart, end: el.selectionEnd };
-    onChange(el.value);
+    notify(e.target.value);
   };
 
   return (
@@ -121,7 +150,7 @@ const MarkdownEditor: React.FC<MarkdownEditorProps> = ({
       )}
       <textarea
         ref={textareaRef}
-        value={value}
+        defaultValue={value}
         onChange={handleChange}
         placeholder={placeholder}
         disabled={disabled}
