@@ -23,7 +23,7 @@ export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ enti
   return (
     <div className="mt-4">
       <div className="flex items-center gap-2 mb-1">
-        <h4 className="text-sm font-medium text-blue-400">Requirements</h4>
+        <h4 className="text-lg font-medium text-blue-400">Requirements</h4>
         {!editing && (
           <button onClick={() => setEditing(true)} className="text-[11px] text-zinc-500 hover:text-zinc-300">Edit</button>
         )}
