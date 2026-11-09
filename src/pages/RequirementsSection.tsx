@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import { updateEntityFields, subscribeConfigStore } from '../lib/configStore';
 import type { ResourceEntity } from '../data/tarSeedData';
 import MarkdownEditor from '../components/MarkdownEditor';
+import MarkdownView from '../components/MarkdownView';
 
 export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ entity }) => {
   const [draft, setDraft] = useState(entity.requirements || '');
@@ -42,7 +43,7 @@ export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ enti
           </div>
         </div>
       ) : (
-        <p className="text-zinc-300 leading-relaxed text-[15px] whitespace-pre-wrap break-words">{entity.requirements || 'No requirements yet.'}</p>
+        <MarkdownView text={entity.requirements || 'No requirements yet.'} className="text-zinc-300 text-[15px]" />
       )}
     </div>
   );
