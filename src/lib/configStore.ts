@@ -433,7 +433,10 @@ function unpackOverlayNotes(raw: string | undefined | null): {
 
 async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<boolean> {
   const client = getProductClient();
-  if (!client?.models?.ProductOverlay) return false;
+  if (!client?.models?.ProductOverlay) {
+    console.warn('[configStore] overlay cloud skipped — no client', entityId);
+    return false;
+  }
   const payload = {
     entityId,
     revision: o.revision,
@@ -444,21 +447,25 @@ async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<b
     modifiedBy: o.modifiedBy,
     lastModified: o.lastModified,
   };
-  try {
-    let result = await client.models.ProductOverlay.update(payload);
-    if (hasErrors(result) || !result?.data) {
-      result = await client.models.ProductOverlay.create(payload);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      let result = await client.models.ProductOverlay.update(payload);
+      if (hasErrors(result) || !result?.data) {
+        result = await client.models.ProductOverlay.create(payload);
+      }
+      if (hasErrors(result) || !result?.data) {
+        console.error('[configStore] overlay cloud write failed', entityId, result?.errors || result);
+        if (attempt === 2) return false;
+        continue;
+      }
+      console.log('[configStore] overlay cloud ok', entityId);
+      return true;
+    } catch (err) {
+      console.error('[configStore] overlay cloud error', entityId, err);
+      if (attempt === 2) return false;
     }
-    if (hasErrors(result) || !result?.data) {
-      console.error('[configStore] overlay cloud write failed', result?.errors || result);
-      return false;
-    }
-    console.log('[configStore] overlay cloud ok', entityId);
-    return true;
-  } catch (err) {
-    console.error('[configStore] overlay cloud error', err);
-    return false;
   }
+  return false;
 }
 
 function packExtraDescription(entity: ResourceEntity): string | undefined {
@@ -617,6 +624,56 @@ export async function uploadLocalConfigToCloud(): Promise<{ ok: boolean; message
     ok: fail === 0,
     message: `Uploaded ${ok} records` + (fail ? `, ${fail} failed` : ''),
   };
+}
+
+
+// ─── Automatic cloud push (laptop → Amplify) ─────────────────────────────────
+// Debounced full upload after any local change, plus on tab hide.
+// Never overwrites local; hydrate keeps local and this only pushes.
+
+let autoPushTimer: ReturnType<typeof setTimeout> | null = null;
+let autoPushInFlight = false;
+
+export function scheduleAutoPushToCloud(delayMs = 1500): void {
+  if (autoPushTimer) clearTimeout(autoPushTimer);
+  autoPushTimer = setTimeout(() => {
+    autoPushTimer = null;
+    void runAutoPush();
+  }, delayMs);
+}
+
+async function runAutoPush(): Promise<void> {
+  if (autoPushInFlight) return;
+  const client = getProductClient();
+  if (!client?.models?.ProductOverlay) {
+    console.warn('[configStore] auto-push skipped — Amplify client not ready');
+    return;
+  }
+  autoPushInFlight = true;
+  try {
+    let ok = 0;
+    let fail = 0;
+    for (const [id, o] of Object.entries(state.overlays)) {
+      (await upsertOverlayCloud(id, o)) ? ok++ : fail++;
+    }
+    for (const e of state.extraEntities) {
+      (await upsertExtraEntityCloud(e)) ? ok++ : fail++;
+    }
+    console.log('[configStore] auto-push', fail === 0 ? 'ok' : 'partial', `sent ${ok}` + (fail ? `, ${fail} failed` : ''));
+  } catch (err) {
+    console.error('[configStore] auto-push failed', err);
+  } finally {
+    autoPushInFlight = false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void runAutoPush();
+  });
+  window.addEventListener('pagehide', () => {
+    void runAutoPush();
+  });
 }
 
 // ─── Local merge API ─────────────────────────────────────────────────────────
@@ -906,6 +963,8 @@ export function updateEntityFields(
   saveLocal(state);
   notify();
   void upsertOverlayCloud(entityId, nextOverlay);
+  scheduleAutoPushToCloud();
+  scheduleAutoPushToCloud();
   return getEntityById(entityId) || null;
 }
 
@@ -994,6 +1053,7 @@ export function bumpEntityRevision(
   saveLocal(state);
   notify();
   void upsertOverlayCloud(entityId, nextOverlay);
+  scheduleAutoPushToCloud();
   void createRevisionEventCloud(record);
 
   const entity = getEntityById(entityId);
