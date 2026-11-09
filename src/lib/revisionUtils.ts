@@ -1,43 +1,52 @@
 /**
- * Phase 1 — Revision helpers
- * Supports letter sequence (A→B→…→Z→AA) and dotted numeric (0.9→1.0→1.1).
+ * Revision helpers — unversioned working state + integer versions after Version 1.
+ *
+ * - New / unestablished entities use UNVERSIONED (or empty / legacy letter with no history).
+ * - User explicitly establishes Version 1.
+ * - Subsequent versions are integer increments (1 → 2 → 3 …).
+ * - Letter sequences remain supported only for already-bumped legacy data.
  */
 import type { ReleaseStatus, ResourceEntity, RevisionRecord } from '../types/plm';
 
-/** Bump a revision string to the next value */
+export const UNVERSIONED = 'Unversioned';
+
+/** True when the entity has not yet been given a formal integer version. */
+export function isUnversioned(revision: string | undefined | null): boolean {
+  const s = (revision || '').trim();
+  if (!s || s === UNVERSIONED || s === 'WIP') return true;
+  // Legacy seed default "A" with no formal history is treated as unversioned
+  // so the user can establish Version 1. Once a numeric version exists, this is false.
+  return false;
+}
+
+/** True when revision is a simple integer version (1, 2, 3 …). */
+export function isFormalVersion(revision: string | undefined | null): boolean {
+  const s = (revision || '').trim();
+  return /^\d+$/.test(s);
+}
+
+/**
+ * Next formal version.
+ * - Unversioned / empty / non-numeric → "1"
+ * - Integer N → N+1
+ * - Legacy letter (A, B, …) → next letter (only if already in letter sequence)
+ */
 export function nextRevision(current: string): string {
-  const s = (current || 'A').trim();
+  const s = (current || '').trim();
 
-  // Dotted numeric: 0.9 → 1.0, 1.0 → 1.1, 1.2 → 1.3
-  if (/^\d+(\.\d+)?$/.test(s)) {
-    const parts = s.split('.');
-    if (parts.length === 1) {
-      return String(Number(parts[0]) + 1);
-    }
-    const major = Number(parts[0]);
-    const minor = Number(parts[1]);
-    // Prefer minor bump for integration-style revs
-    return `${major}.${minor + 1}`;
+  // Integer versions increment
+  if (/^\d+$/.test(s)) {
+    return String(Number(s) + 1);
   }
 
-  // Letter sequence: A → B … Z → AA → AB
-  const upper = s.toUpperCase();
-  if (/^[A-Z]+$/.test(upper)) {
-    const chars = upper.split('');
-    let i = chars.length - 1;
-    while (i >= 0) {
-      if (chars[i] !== 'Z') {
-        chars[i] = String.fromCharCode(chars[i].charCodeAt(0) + 1);
-        return chars.join('');
-      }
-      chars[i] = 'A';
-      i -= 1;
-    }
-    return 'A' + chars.join('');
+  // Dotted numeric kept for compatibility (1.0 → 1.1)
+  if (/^\d+\.\d+$/.test(s)) {
+    const [maj, min] = s.split('.');
+    return `${maj}.${Number(min) + 1}`;
   }
 
-  // Fallback: append .1
-  return `${s}.1`;
+  // Everything else (Unversioned, WIP, legacy letters A/B/C, empty) → Version 1
+  return '1';
 }
 
 export function makeRevisionRecord(input: {

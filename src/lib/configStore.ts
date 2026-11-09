@@ -24,11 +24,67 @@ import {
 import { ALL_ENTITIES, TAR_TREE } from '../data/tarSeedData';
 import { SEED_REVISION_HISTORY } from '../data/revisionSeed';
 import { SEED_BASELINES } from '../data/baselinesSeed';
-import { makeRevisionRecord, nextRevision, sortHistoryNewestFirst } from './revisionUtils';
+import { makeRevisionRecord, nextRevision, sortHistoryNewestFirst, UNVERSIONED, isFormalVersion } from './revisionUtils';
 import { getProductClient } from './productAmplify';
 import { sortChildren } from './childOrderStore';
 
 const STORAGE_KEY = 'vector-plm-config-v1';
+
+/** Fields captured at the moment a formal version is established or incremented. */
+export type VersionSnapshot = {
+  name: string;
+  description?: string;
+  notes?: string;
+  tags?: string[];
+  status: string;
+};
+
+const SNAP_PREFIX = '||SNAP||';
+
+export function makeVersionSnapshot(entity: ResourceEntity): VersionSnapshot {
+  return {
+    name: entity.name || '',
+    description: entity.description || undefined,
+    notes: (entity as ResourceEntity & { notes?: string }).notes || undefined,
+    tags: entity.tags && entity.tags.length ? [...entity.tags] : undefined,
+    status: entity.status || 'Draft',
+  };
+}
+
+export function snapshotsEqual(a: VersionSnapshot | null | undefined, b: VersionSnapshot | null | undefined): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  const norm = (s: VersionSnapshot) => ({
+    name: s.name || '',
+    description: s.description || '',
+    notes: s.notes || '',
+    tags: (s.tags || []).slice().sort(),
+    status: s.status || '',
+  });
+  return JSON.stringify(norm(a)) === JSON.stringify(norm(b));
+}
+
+/** Embed a snapshot into changesSummary so it survives cloud round-trip. */
+export function encodeChangesSummary(userSummary: string | undefined, snap: VersionSnapshot): string {
+  const payload = SNAP_PREFIX + JSON.stringify(snap);
+  return userSummary ? `${userSummary}
+${payload}` : payload;
+}
+
+export function decodeChangesSummary(raw: string | undefined): { summary?: string; snapshot?: VersionSnapshot } {
+  if (!raw) return {};
+  const i = raw.indexOf(SNAP_PREFIX);
+  if (i < 0) return { summary: raw };
+  const before = raw.slice(0, i).trim();
+  const json = raw.slice(i + SNAP_PREFIX.length).trim();
+  try {
+    const snapshot = JSON.parse(json) as VersionSnapshot;
+    return { summary: before || undefined, snapshot };
+  } catch {
+    return { summary: raw };
+  }
+}
+
 
 export type EntityOverlay = {
   revision: string;
@@ -38,7 +94,6 @@ export type EntityOverlay = {
   name?: string;
   description?: string;
   notes?: string;
-  requirements?: string;
   tags?: string[];
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
@@ -179,7 +234,6 @@ async function pullFromCloud(): Promise<boolean> {
           name: row.name ?? undefined,
           description: row.description ?? undefined,
           notes: unpacked.notes ?? undefined,
-          requirements: unpacked.requirements ?? undefined,
           tags: unpacked.tags,
           structuralType:
             unpacked.structuralType || localPrev?.structuralType || undefined,
@@ -271,14 +325,12 @@ function packOverlayNotes(o: EntityOverlay): string | undefined {
   if (o.structuralType) meta.st = o.structuralType;
   if (o.kind) meta.k = o.kind;
   if (o.tags !== undefined) meta.tg = o.tags.join(',');
-  if (o.requirements !== undefined) meta.rq = o.requirements;
   if (!Object.keys(meta).length) return o.notes;
   return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
 }
 
 function unpackOverlayNotes(raw: string | undefined | null): {
   notes?: string;
-  requirements?: string;
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
   supplierId?: string;
@@ -288,10 +340,9 @@ function unpackOverlayNotes(raw: string | undefined | null): {
   const m = raw.match(PLM_META_RE);
   if (!m) return { notes: raw };
   try {
-    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string; rq?: string };
+    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string };
     return {
       notes: raw.slice(m[0].length) || undefined,
-      requirements: meta.rq,
       structuralType: meta.st as StructuralEntityType | undefined,
       kind: meta.k as ElementKind | undefined,
       supplierId: meta.sid,
@@ -490,7 +541,7 @@ export async function uploadLocalConfigToCloud(): Promise<{ ok: boolean; message
   };
 }
 
-// ─── Local merge API ───────────────────────────────────────────────────────────────
+// ─── Local merge API ─────────────────────────────────────────────────────────
 
 export function applyOverlay(entity: ResourceEntity): ResourceEntity {
   const o = state.overlays[entity.id];
@@ -506,9 +557,8 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
     type: o.structuralType ?? entity.type,
     kind: o.kind !== undefined ? o.kind : entity.kind,
     ...(o.notes !== undefined ? { notes: o.notes } : {}),
-    ...(o.requirements !== undefined ? { requirements: o.requirements } : {}),
     ...(o.tags !== undefined ? { tags: o.tags } : {}),
-  } as ResourceEntity & { notes?: string; requirements?: string };
+  } as ResourceEntity & { notes?: string };
 }
 
 function isRemoved(id: string): boolean {
@@ -573,40 +623,87 @@ function allowedChildTypesFor(parent: ResourceEntity): StructuralEntityType[] {
   if (isIntegratorContainer(parent) || isCompanyNode(parent)) return ['Element'];
   if (canAttachIntegrators(parent)) return ['Element'];
   if (parent.type === 'Subsystem') return ['Component', 'Element'];
+  if (parent.type === 'Component') return ['Element'];
   return ALLOWED_CHILD_TYPES[parent.type] || [];
 }
 
+function resolvedChildKind(
+  parent: ResourceEntity,
+  inputType: StructuralEntityType,
+  requested?: ElementKind
+): ElementKind | undefined {
+  if (inputType !== 'Element') return undefined;
+  if (isCompanyNode(parent)) return 'product';
+  if (isIntegratorContainer(parent)) {
+    return requested === 'product' ? 'product' : 'company';
+  }
+  if (canAttachIntegrators(parent)) {
+    if (requested === 'product') return 'product';
+    if (requested === 'integrator') return 'integrator';
+    if (requested === 'company') return 'company';
+    return requested;
+  }
+  return requested;
+}
+
+/**
+ * Add a child under parentId.
+ * Product structure: System → Subsystem → Component → Element
+ * Integrator branch: Vertical Integrators → Company → Product
+ */
 export function addChildEntity(
   parentId: string,
   input: {
     name: string;
-    type: AddableChildType;
+    type: StructuralEntityType;
     description?: string;
+    createdBy?: string;
+    /** Required when type === 'Element' */
     kind?: ElementKind;
+    /** Linked supplier id (Vertical Integrator ↔ Suppliers page) */
     relatedIds?: string[];
   }
 ): ResourceEntity | null {
-  const parent = getEntityById(parentId);
+  const parent = getEntityById(parentId) || ALL_ENTITIES.find((e) => e.id === parentId);
   if (!parent) return null;
+
   const allowed = allowedChildTypesFor(parent);
-  if (!allowed.includes(input.type)) return null;
+  if (!allowed.includes(input.type)) {
+    console.warn(
+      `[configStore] cannot add ${input.type} under ${parent.type} (${parent.id}). Allowed: ${allowed.join(', ') || 'none'}`
+    );
+    return null;
+  }
+
+  const name = input.name.trim();
+  if (!name) return null;
+
+  const kind = resolvedChildKind(parent, input.type, input.kind);
+  if (input.type === 'Element' && !kind) {
+    console.warn('[configStore] Element requires a kind');
+    return null;
+  }
 
   const now = new Date().toISOString();
-  const id = `${input.type.toLowerCase()}-${slugify(input.name)}-${Date.now().toString(36)}`;
+  const by = input.createdBy ?? 'Zedekiah';
+  const id = `user-${parentId}-${slugify(name)}-${Date.now().toString(36)}`;
+
   const entity: ResourceEntity = {
     id,
-    parentId,
-    name: input.name.trim(),
+    name,
     type: input.type,
     description: input.description?.trim() || undefined,
-    revision: 'A',
+    parentId,
+    revision: UNVERSIONED,
     status: 'Draft',
-    lastModified: now,
-    modifiedBy: 'Zedekiah',
     createdAt: now,
+    lastModified: now,
+    modifiedBy: by,
     children: [],
-    kind: input.kind,
-    relatedIds: input.relatedIds,
+    ...(kind ? { kind } : {}),
+    ...(input.relatedIds && input.relatedIds.length
+      ? { relatedIds: input.relatedIds }
+      : {}),
   };
 
   state = {
@@ -616,31 +713,49 @@ export function addChildEntity(
   saveLocal(state);
   notify();
   void upsertExtraEntityCloud(entity);
-  return entity;
+  return applyOverlay(entity);
 }
 
-export function removeChildEntity(id: string): ResourceEntity | null {
-  const current = getEntityById(id);
+function collectSubtreeIds(rootId: string): string[] {
+  const ids: string[] = [];
+  const walkMerged = (id: string) => {
+    ids.push(id);
+    for (const e of [...ALL_ENTITIES, ...state.extraEntities]) {
+      if (e.parentId === id && !ids.includes(e.id)) walkMerged(e.id);
+    }
+  };
+  walkMerged(rootId);
+  return ids;
+}
+
+/**
+ * Remove a constituent under a subsystem (Component / Element / Software / Interface / Integrator).
+ * Seed nodes are hidden via removedIds; user-added ExtraEntity rows are deleted.
+ * System and Subsystem cannot be removed here.
+ */
+export function removeChildEntity(entityId: string): ResourceEntity | null {
+  const current = getEntityById(entityId);
   if (!current) return null;
+  if (current.type === 'System' || current.type === 'Subsystem') return null;
   if (!REMOVABLE_CHILD_TYPES.has(current.type)) return null;
 
-  const extrasToDelete = state.extraEntities
-    .filter((e) => e.id === id || e.parentId === id)
-    .map((e) => e.id);
+  const ids = collectSubtreeIds(entityId);
+  const extraSet = new Set(state.extraEntities.map((e) => e.id));
+  const extrasToDelete = ids.filter((id) => extraSet.has(id));
 
   state = {
     ...state,
-    extraEntities: state.extraEntities.filter((e) => e.id !== id && e.parentId !== id),
+    extraEntities: state.extraEntities.filter((e) => !ids.includes(e.id)),
     overlays: Object.fromEntries(
-      Object.entries(state.overlays).filter(([eid]) => eid !== id && !extrasToDelete.includes(eid))
+      Object.entries(state.overlays).filter(([id]) => !ids.includes(id))
     ),
-    removedIds: Array.from(new Set([...(state.removedIds || []), id, ...extrasToDelete])),
+    removedIds: Array.from(new Set([...(state.removedIds || []), ...ids])),
   };
   saveLocal(state);
   notify();
   persistRemovedIdsCloud();
-  extrasToDelete.forEach((eid) => {
-    void deleteExtraEntityCloud(eid);
+  extrasToDelete.forEach((id) => {
+    void deleteExtraEntityCloud(id);
   });
   return current;
 }
@@ -651,7 +766,6 @@ export function updateEntityFields(
     name?: string;
     description?: string;
     notes?: string;
-    requirements?: string;
     tags?: string[];
     modifiedBy?: string;
     type?: StructuralEntityType;
@@ -696,7 +810,6 @@ export function updateEntityFields(
     name: fields.name !== undefined ? fields.name : prev?.name,
     description: fields.description !== undefined ? fields.description : prev?.description,
     notes: fields.notes !== undefined ? fields.notes : prev?.notes,
-    requirements: fields.requirements !== undefined ? fields.requirements : prev?.requirements,
     tags: fields.tags !== undefined ? fields.tags : prev?.tags,
     structuralType: fields.type !== undefined ? fields.type : prev?.structuralType,
     kind: fields.kind !== undefined ? fields.kind : prev?.kind,
@@ -704,7 +817,6 @@ export function updateEntityFields(
   if (fields.name !== undefined) nextOverlay.name = fields.name;
   if (fields.description !== undefined) nextOverlay.description = fields.description;
   if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
-  if (fields.requirements !== undefined) nextOverlay.requirements = fields.requirements;
   if (fields.tags !== undefined) nextOverlay.tags = fields.tags;
   if (fields.type !== undefined) nextOverlay.structuralType = fields.type;
   if (fields.kind !== undefined) nextOverlay.kind = fields.kind;
@@ -717,6 +829,30 @@ export function updateEntityFields(
   notify();
   void upsertOverlayCloud(entityId, nextOverlay);
   return getEntityById(entityId) || null;
+}
+
+
+/** Latest formal version snapshot for an entity (from history), or null. */
+export function getLastVersionSnapshot(entityId: string): VersionSnapshot | null {
+  const hist = getHistoryForEntity(entityId);
+  for (const r of hist) {
+    const decoded = decodeChangesSummary(r.changesSummary);
+    if (decoded.snapshot) return decoded.snapshot;
+  }
+  return null;
+}
+
+/**
+ * True when the entity has a formal version and its current fields differ
+ * from the snapshot taken at the last version establish/increment.
+ */
+export function isEntityDirty(entityId: string): boolean {
+  const entity = getEntityById(entityId);
+  if (!entity) return false;
+  if (!isFormalVersion(entity.revision)) return false;
+  const last = getLastVersionSnapshot(entityId);
+  if (!last) return false; // no snapshot yet — treat as clean until next edit after a version
+  return !snapshotsEqual(makeVersionSnapshot(entity), last);
 }
 
 export function bumpEntityRevision(
@@ -737,13 +873,16 @@ export function bumpEntityRevision(
   const now = new Date().toISOString();
   const by = opts?.changedBy ?? 'Zedekiah';
 
+  const snapshot = makeVersionSnapshot(current);
+  const encodedSummary = encodeChangesSummary(opts?.changesSummary || opts?.comment, snapshot);
+
   const record = makeRevisionRecord({
     entityId,
     revision: newRev,
     status: newStatus,
     changedBy: by,
     comment: opts?.comment,
-    changesSummary: opts?.changesSummary,
+    changesSummary: encodedSummary,
   });
 
   if (state.extraEntities.some((e) => e.id === entityId)) {
@@ -767,8 +906,6 @@ export function bumpEntityRevision(
     name: prev?.name,
     description: prev?.description,
     notes: prev?.notes,
-    requirements: prev?.requirements,
-    tags: prev?.tags,
   };
 
   state = {
@@ -794,22 +931,23 @@ export function createBaseline(input: {
   entityIds?: string[];
 }): Baseline {
   const entities = getAllEntitiesWithOverlays();
+  const ids = input.entityIds ? new Set(input.entityIds) : null;
   const entityRevisions: Record<string, string> = {};
   for (const e of entities) {
-    if (input.entityIds && !input.entityIds.includes(e.id)) continue;
-    entityRevisions[e.id] = e.revision;
+    if (!ids || ids.has(e.id)) entityRevisions[e.id] = e.revision;
   }
-  const now = new Date().toISOString();
+
   const baseline: Baseline = {
-    id: `bl-${slugify(input.name)}-${Date.now().toString(36)}`,
+    id: `bl-${Date.now()}`,
     type: 'Baseline',
-    name: input.name.trim(),
-    description: input.description?.trim() || undefined,
-    status: input.status || 'Released',
+    name: input.name,
+    description: input.description,
+    createdAt: new Date().toISOString(),
+    createdBy: input.createdBy ?? 'Zedekiah',
+    status: input.status ?? 'Draft',
     entityRevisions,
-    createdAt: now,
-    createdBy: input.createdBy || 'Zedekiah',
   };
+
   state = {
     ...state,
     extraBaselines: [...state.extraBaselines, baseline],

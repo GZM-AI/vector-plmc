@@ -2,7 +2,7 @@
  * System Registry — TAR™ product structure
  * Overview | Tree (type filter) | Deep-link ?id=
  * Phase 0: revision + status + attachments
- * Phase 1: revision history timeline + bump revision (configStore)
+ * Phase 1: revision history. Unversioned by default; user establishes Version 1; later versions on significant change.
  */
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
@@ -80,9 +80,11 @@ import {
   getRegistryTree,
   getMergedAllEntities,
   getEntityById,
+  isEntityDirty,
+  decodeChangesSummary,
   type AddableChildType,
 } from '../lib/configStore';
-import { nextRevision } from '../lib/revisionUtils';
+import { nextRevision, isUnversioned, isFormalVersion, UNVERSIONED } from '../lib/revisionUtils';
 import { PlatformSelector } from '../components/PlatformSelector';
 import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
 import { RequirementsSection } from './RequirementsSection';
@@ -403,7 +405,7 @@ const TreeNode: React.FC<TreeNodeProps> = ({
           )}
         <span className="flex-1" />
         <span className="text-[10px] text-zinc-600 shrink-0 hidden sm:inline">
-          Rev {display.revision}
+          {isFormalVersion(display.revision) ? `Rev ${display.revision}` : UNVERSIONED}
         </span>
         {node.type === 'Subsystem' && (
           <span className="text-[10px] uppercase tracking-wider text-zinc-500 shrink-0">
@@ -965,8 +967,13 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 {entity.status}
               </span>
               <span className="text-xs px-2.5 py-1 rounded-full bg-zinc-950 border border-zinc-700 text-zinc-300">
-                Rev {entity.revision}
+                {isFormalVersion(entity.revision) ? `Rev ${entity.revision}` : UNVERSIONED}
               </span>
+              {isFormalVersion(entity.revision) && isEntityDirty(entity.id) && (
+                <span className="text-xs px-2.5 py-1 rounded-full bg-amber-950/60 text-amber-300 border border-amber-800/60">
+                  Changes pending
+                </span>
+              )}
               {entity.classification && (
                 <span className="text-xs px-2.5 py-1 rounded-full bg-red-950/50 text-red-300 border border-red-900/50">
                   {entity.classification}
@@ -1009,10 +1016,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             <button
               type="button"
               onClick={() => setShowBump((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-blue-600/20 border border-blue-700/50 text-blue-300 hover:bg-blue-600/30"
+              className={`inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl border ${
+                isFormalVersion(entity.revision) && isEntityDirty(entity.id)
+                  ? 'bg-amber-600/20 border-amber-700/60 text-amber-300 hover:bg-amber-600/30'
+                  : 'bg-blue-600/20 border-blue-700/50 text-blue-300 hover:bg-blue-600/30'
+              }`}
             >
               <ArrowUpCircle size={12} />
-              Bump revision
+              {isFormalVersion(entity.revision) ? 'Create new version' : 'Establish Version 1'}
             </button>
             {canRemoveSelf && pendingRemoveId !== entity.id && (
               <button
@@ -1155,9 +1166,21 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       {showBump && (
         <div className="bg-zinc-950 border border-blue-900/40 rounded-2xl p-4 space-y-3">
           <div className="text-sm text-zinc-300">
-            Current <span className="text-white font-medium">Rev {entity.revision}</span>
-            <span className="text-zinc-500"> → </span>
-            Next <span className="text-blue-300 font-medium">Rev {previewNext}</span>
+            {isFormalVersion(entity.revision) ? (
+              <>
+                Current <span className="text-white font-medium">Rev {entity.revision}</span>
+                <span className="text-zinc-500"> → </span>
+                Next <span className="text-blue-300 font-medium">Rev {previewNext}</span>
+                {isEntityDirty(entity.id) && (
+                  <span className="ml-2 text-amber-300 text-xs">· changes pending</span>
+                )}
+              </>
+            ) : (
+              <>
+                This item is currently <span className="text-white font-medium">{UNVERSIONED}</span>.
+                Establishing Version 1 records the current design as the first controlled revision.
+              </>
+            )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
@@ -1189,7 +1212,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
               onClick={handleBump}
               className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-500 text-sm font-medium"
             >
-              Confirm bump to {previewNext}
+              {isFormalVersion(entity.revision) ? `Create Version ${previewNext}` : 'Establish Version 1'}
             </button>
             <button
               type="button"
@@ -1368,8 +1391,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         </h4>
         {history.length === 0 ? (
           <p className="text-xs text-zinc-600 bg-zinc-950/60 border border-zinc-800/80 rounded-2xl px-4 py-3">
-            No history yet. Use <span className="text-zinc-400">Bump revision</span> to create the
-            first recorded change.
+            No formal versions yet. Use <span className="text-zinc-400">Establish Version 1</span> when
+            the design is ready to be controlled.
           </p>
         ) : (
           <ul className="space-y-2 relative">
@@ -1404,9 +1427,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                   {r.comment && (
                     <p className="text-xs text-zinc-400 mt-1">{r.comment}</p>
                   )}
-                  {r.changesSummary && (
-                    <p className="text-[11px] text-zinc-600 mt-0.5">{r.changesSummary}</p>
-                  )}
+                  {(() => {
+                    const decoded = decodeChangesSummary(r.changesSummary);
+                    return decoded.summary ? (
+                      <p className="text-[11px] text-zinc-600 mt-0.5">{decoded.summary}</p>
+                    ) : null;
+                  })()}
                 </div>
               </li>
             ))}
@@ -1423,7 +1449,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 onChange={(e) => setCompareA(e.target.value)}
                 className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs"
               >
-                <option value="">Rev A…</option>
+                <option value="">Earlier…</option>
                 {revOptions.map((r) => (
                   <option key={`a-${r}`} value={r}>
                     {r}
@@ -1436,7 +1462,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                 onChange={(e) => setCompareB(e.target.value)}
                 className="bg-zinc-900 border border-zinc-700 rounded-lg px-2 py-1.5 text-xs"
               >
-                <option value="">Rev B…</option>
+                <option value="">Later…</option>
                 {revOptions.map((r) => (
                   <option key={`b-${r}`} value={r}>
                     {r}
@@ -1880,7 +1906,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                         <span className="text-sm font-medium text-white group-hover:text-blue-300 truncate">
                           {c.name}
                         </span>
-                        <span className="text-[10px] text-zinc-600 ml-auto">Rev {c.revision}</span>
+                        <span className="text-[10px] text-zinc-600 ml-auto">{isFormalVersion(c.revision) ? `Rev ${c.revision}` : UNVERSIONED}</span>
                       </div>
                       <p className="text-xs text-zinc-500 line-clamp-2">
                         {c.description || TYPE_LABEL[child.type]}
@@ -2078,7 +2104,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                           </span>
                         )}
                         <span className="text-[10px] text-zinc-600 ml-auto">
-                          Rev {c.revision}
+                          {isFormalVersion(c.revision) ? `Rev ${c.revision}` : UNVERSIONED}
                         </span>
                       </div>
                       <p className="text-xs text-zinc-500 line-clamp-2">
@@ -2213,7 +2239,7 @@ const SubsystemOverviewCard: React.FC<{
           );
         })}
         <span className="px-2 py-0.5 rounded-full bg-zinc-950 border border-zinc-800">
-          Rev {sub.revision}
+          {isFormalVersion(sub.revision) ? `Rev ${sub.revision}` : UNVERSIONED}
         </span>
         {integratorCount > 0 && (
           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-zinc-950 border border-amber-900/40 text-amber-300/80">
@@ -2314,7 +2340,7 @@ const SubsystemOverviewCard: React.FC<{
                       </span>
                     );
                   })()}
-                  <span className="text-[10px] text-zinc-600 shrink-0">Rev {c.revision}</span>
+                  <span className="text-[10px] text-zinc-600 shrink-0">{isFormalVersion(c.revision) ? `Rev ${c.revision}` : UNVERSIONED}</span>
                   <ChevronRight size={12} className="text-zinc-600 shrink-0" />
                 </button>
                 {(child.type === 'Component' ||
