@@ -285,6 +285,42 @@ async function pullFromCloud(): Promise<boolean> {
       createdAt: row.createdAt,
     }));
 
+    // Keep local-only records and push them up so local changes reach cloud by default.
+    const local = state;
+    const cloudOverlayIds = new Set(Object.keys(overlays));
+    const cloudEntityIds = new Set(extraEntities.map((e) => e.id));
+    const cloudHistoryIds = new Set(extraHistory.map((r) => r.id));
+    const cloudBaselineIds = new Set(extraBaselines.map((b) => b.id));
+
+    for (const [id, o] of Object.entries(local.overlays)) {
+      if (!cloudOverlayIds.has(id)) {
+        overlays[id] = o;
+        void upsertOverlayCloud(id, o);
+      }
+    }
+    for (const e of local.extraEntities) {
+      if (!cloudEntityIds.has(e.id) && !removedIds.includes(e.id)) {
+        extraEntities.push(e);
+        void upsertExtraEntityCloud(e);
+      }
+    }
+    for (const r of local.extraHistory) {
+      if (!cloudHistoryIds.has(r.id)) {
+        extraHistory.push(r);
+        void createRevisionEventCloud(r);
+      }
+    }
+    for (const b of local.extraBaselines) {
+      if (!cloudBaselineIds.has(b.id)) {
+        extraBaselines.push(b);
+        void createBaselineCloud(b);
+      }
+    }
+    // Local removals that cloud does not yet know about
+    for (const id of local.removedIds || []) {
+      if (!removedIds.includes(id)) removedIds.push(id);
+    }
+
     state = {
       overlays,
       extraEntities: extraEntities.filter((e) => !removedIds.includes(e.id)),
@@ -294,7 +330,14 @@ async function pullFromCloud(): Promise<boolean> {
       cloudHydrated: true,
     };
     saveLocal(state);
-    console.log('[configStore] hydrated from cloud', {
+    // Persist merged removals
+    void upsertOverlayCloud(REMOVED_IDS_OVERLAY_ID, {
+      revision: 'A',
+      status: 'Draft',
+      lastModified: new Date().toISOString(),
+      notes: JSON.stringify(removedIds),
+    });
+    console.log('[configStore] hydrated from cloud (local-only records pushed)', {
       overlays: Object.keys(overlays).length,
       extraEntities: extraEntities.length,
       history: extraHistory.length,
