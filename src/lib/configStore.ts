@@ -287,6 +287,7 @@ async function pullFromCloud(): Promise<boolean> {
 
     // Keep local-only records and push them up so local changes reach cloud by default.
     // If both exist, prefer the one with the newer lastModified and push it.
+    // (hydrate prefers local-newer — 2026-11-09)
     const local = state;
     const cloudOverlayIds = new Set(Object.keys(overlays));
     const cloudEntityIds = new Set(extraEntities.map((e) => e.id));
