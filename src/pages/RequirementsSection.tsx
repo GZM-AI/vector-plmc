@@ -4,6 +4,7 @@
 import React, { useState, useEffect } from 'react';
 import { updateEntityFields, subscribeConfigStore } from '../lib/configStore';
 import type { ResourceEntity } from '../data/tarSeedData';
+import MarkdownEditor from '../components/MarkdownEditor';
 
 export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ entity }) => {
   const [draft, setDraft] = useState(entity.requirements || '');
@@ -28,12 +29,12 @@ export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ enti
       </div>
       {editing ? (
         <div>
-          <textarea
+          <MarkdownEditor
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={4}
-            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y"
+            onChange={setDraft}
             placeholder="Requirements for this part…"
+            minHeight="min-h-[100px]"
+            rows={4}
           />
           <div className="flex gap-2 mt-1">
             <button onClick={save} className="text-xs px-2 py-1 bg-blue-600 rounded text-white">Save</button>
