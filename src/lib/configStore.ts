@@ -964,7 +964,6 @@ export function updateEntityFields(
   notify();
   void upsertOverlayCloud(entityId, nextOverlay);
   scheduleAutoPushToCloud();
-  scheduleAutoPushToCloud();
   return getEntityById(entityId) || null;
 }
 
