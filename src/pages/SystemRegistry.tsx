@@ -502,7 +502,7 @@ function ReferenceImageSlot({ entityId }: { entityId: string }) {
           src={url}
           alt="Component reference"
           className={
-            'min-w-[200px] w-[200px] h-auto max-h-64 object-contain rounded-lg border border-zinc-700 shrink-0 ' +
+            'min-w-[400px] w-[400px] h-auto max-h-64 object-contain rounded-lg border border-zinc-700 shrink-0 ' +
             (isPng ? 'bg-transparent' : 'bg-black/40')
           }
           style={isPng ? { background: 'transparent' } : undefined}
