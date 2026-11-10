@@ -1293,9 +1293,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           <textarea
             value={draftNotes}
             onChange={(e) => setDraftNotes(e.target.value)}
-            rows={6}
+            rows={14}
             placeholder="Working notes, open questions, links to decisions. Line breaks and paragraphs are kept."
-            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y min-h-[120px]"
+            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y min-h-[280px]"
           />
         ) : (entity as ResourceEntity & { notes?: string }).notes ? (
           <div className="text-zinc-400 leading-relaxed text-sm whitespace-pre-wrap break-words">
