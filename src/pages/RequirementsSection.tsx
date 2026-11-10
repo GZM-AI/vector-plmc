@@ -34,8 +34,8 @@ export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ enti
             value={draft}
             onChange={setDraft}
             placeholder="Requirements for this part…"
-            minHeight="min-h-[100px]"
-            rows={4}
+            minHeight="min-h-[280px]"
+            rows={14}
           />
           <div className="flex gap-2 mt-1">
             <button onClick={save} className="text-xs px-2 py-1 bg-blue-600 rounded text-white">Save</button>
