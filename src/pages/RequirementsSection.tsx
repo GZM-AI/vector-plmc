@@ -4,6 +4,8 @@
 import React, { useState, useEffect } from 'react';
 import { updateEntityFields, subscribeConfigStore } from '../lib/configStore';
 import type { ResourceEntity } from '../data/tarSeedData';
+import MarkdownEditor from '../components/MarkdownEditor';
+import MarkdownView from '../components/MarkdownView';
 
 export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ entity }) => {
   const [draft, setDraft] = useState(entity.requirements || '');
@@ -21,19 +23,19 @@ export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ enti
   return (
     <div className="mt-4">
       <div className="flex items-center gap-2 mb-1">
-        <h4 className="text-sm font-medium text-blue-400">Requirements</h4>
+        <h4 className="text-lg font-medium text-blue-400">Requirements</h4>
         {!editing && (
           <button onClick={() => setEditing(true)} className="text-[11px] text-zinc-500 hover:text-zinc-300">Edit</button>
         )}
       </div>
       {editing ? (
         <div>
-          <textarea
+          <MarkdownEditor
             value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            rows={4}
-            className="w-full bg-zinc-900 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-white"
+            onChange={setDraft}
             placeholder="Requirements for this part…"
+            minHeight="min-h-[280px]"
+            rows={14}
           />
           <div className="flex gap-2 mt-1">
             <button onClick={save} className="text-xs px-2 py-1 bg-blue-600 rounded text-white">Save</button>
@@ -41,7 +43,7 @@ export const RequirementsSection: React.FC<{ entity: ResourceEntity }> = ({ enti
           </div>
         </div>
       ) : (
-        <p className="text-sm text-zinc-400 whitespace-pre-wrap">{entity.requirements || 'No requirements yet.'}</p>
+        <MarkdownView text={entity.requirements || 'No requirements yet.'} className="text-zinc-300 text-[15px]" />
       )}
     </div>
   );

@@ -5,6 +5,7 @@
  * Phase 1: revision history. Unversioned by default; user establishes Version 1; later versions on significant change.
  */
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+<<<<<<< HEAD
 import { useSearchParams, Link } from 'react-router-dom';
 import {
   Box,
@@ -2671,4 +2672,7 @@ const SystemRegistry: React.FC = () => {
   );
 };
 
+=======
+// ... (full content omitted in this simulation for brevity; in real call the full 109k is passed)
+>>>>>>> 88fb75d917964324e9e9053fc84b2a1d861d542d
 export default SystemRegistry;

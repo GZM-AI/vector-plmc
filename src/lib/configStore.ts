@@ -95,6 +95,7 @@ export type EntityOverlay = {
   description?: string;
   notes?: string;
   tags?: string[];
+  requirements?: string;
   structuralType?: StructuralEntityType;
   kind?: ElementKind;
 };
@@ -154,12 +155,38 @@ function loadLocal(): StoreState {
   }
 }
 
+const BACKUP_KEY = 'vector-plm-config-v1-backup';
+
 function saveLocal(s: StoreState): void {
   try {
     const { cloudHydrated: _, ...rest } = s;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
   } catch {
     /* ignore */
+  }
+}
+
+/** Keep the previous local cache so a hydrate cannot permanently erase laptop edits. */
+function backupLocalBeforeHydrate(): void {
+  try {
+    const current = localStorage.getItem(STORAGE_KEY);
+    if (current && current.length > 20) {
+      localStorage.setItem(BACKUP_KEY, current);
+      localStorage.setItem(BACKUP_KEY + '-at', new Date().toISOString());
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+export function restoreLocalFromBackup(): boolean {
+  try {
+    const backup = localStorage.getItem(BACKUP_KEY);
+    if (!backup) return false;
+    localStorage.setItem(STORAGE_KEY, backup);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -192,6 +219,7 @@ async function pullFromCloud(): Promise<boolean> {
     console.warn('[configStore] cloud pull skipped — no client / models');
     return false;
   }
+  backupLocalBeforeHydrate();
   try {
     const [ov, ex, rev, bl] = await Promise.all([
       client.models.ProductOverlay.list({ limit: 1000 }),
@@ -235,6 +263,7 @@ async function pullFromCloud(): Promise<boolean> {
           description: row.description ?? undefined,
           notes: unpacked.notes ?? undefined,
           tags: unpacked.tags,
+          requirements: unpacked.requirements,
           structuralType:
             unpacked.structuralType || localPrev?.structuralType || undefined,
           kind: unpacked.kind || localPrev?.kind || undefined,
@@ -285,22 +314,50 @@ async function pullFromCloud(): Promise<boolean> {
       createdAt: row.createdAt,
     }));
 
-    // Keep local-only records and push them up so local changes reach cloud by default.
+    // Team sync: cloud is shared source of truth.
+    // Local-only records are pushed. If both exist, newer lastModified wins.
+    // A stale browser must not overwrite another team member's newer cloud edit.
+    // Local is backed up before this merge so unsynced work is recoverable.
     const local = state;
     const cloudOverlayIds = new Set(Object.keys(overlays));
     const cloudEntityIds = new Set(extraEntities.map((e) => e.id));
     const cloudHistoryIds = new Set(extraHistory.map((r) => r.id));
     const cloudBaselineIds = new Set(extraBaselines.map((b) => b.id));
 
+    let pushedLocal = 0;
+    let tookCloud = 0;
     for (const [id, o] of Object.entries(local.overlays)) {
-      if (!cloudOverlayIds.has(id)) {
+      const cloud = overlays[id];
+      if (!cloud) {
         overlays[id] = o;
         void upsertOverlayCloud(id, o);
+        pushedLocal++;
+        continue;
+      }
+      const localTime = Date.parse(o.lastModified || '') || 0;
+      const cloudTime = Date.parse(cloud.lastModified || '') || 0;
+      if (localTime > cloudTime) {
+        overlays[id] = o;
+        void upsertOverlayCloud(id, o);
+        pushedLocal++;
+      } else {
+        tookCloud++;
       }
     }
+    console.log('[configStore] hydrate team merge', { pushedLocal, tookCloud });
     for (const e of local.extraEntities) {
-      if (!cloudEntityIds.has(e.id) && !removedIds.includes(e.id)) {
+      if (removedIds.includes(e.id)) continue;
+      const cloudIdx = extraEntities.findIndex((c) => c.id === e.id);
+      if (cloudIdx < 0) {
         extraEntities.push(e);
+        void upsertExtraEntityCloud(e);
+        continue;
+      }
+      const cloud = extraEntities[cloudIdx];
+      const localTime = Date.parse(e.lastModified || '') || 0;
+      const cloudTime = Date.parse(cloud.lastModified || '') || 0;
+      if (localTime > cloudTime) {
+        extraEntities[cloudIdx] = e;
         void upsertExtraEntityCloud(e);
       }
     }
@@ -337,7 +394,7 @@ async function pullFromCloud(): Promise<boolean> {
       lastModified: new Date().toISOString(),
       notes: JSON.stringify(removedIds),
     });
-    console.log('[configStore] hydrated from cloud (local-only records pushed)', {
+    console.log('[configStore] hydrated from cloud (local-newer or local-only records pushed)', {
       overlays: Object.keys(overlays).length,
       extraEntities: extraEntities.length,
       history: extraHistory.length,
@@ -368,6 +425,7 @@ function packOverlayNotes(o: EntityOverlay): string | undefined {
   if (o.structuralType) meta.st = o.structuralType;
   if (o.kind) meta.k = o.kind;
   if (o.tags !== undefined) meta.tg = o.tags.join(',');
+  if (o.requirements !== undefined) meta.rq = o.requirements;
   if (!Object.keys(meta).length) return o.notes;
   return `[[plm-meta]]${JSON.stringify(meta)}\n${user}`;
 }
@@ -378,18 +436,20 @@ function unpackOverlayNotes(raw: string | undefined | null): {
   kind?: ElementKind;
   supplierId?: string;
   tags?: string[];
+  requirements?: string;
 } {
   if (!raw) return {};
   const m = raw.match(PLM_META_RE);
   if (!m) return { notes: raw };
   try {
-    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string };
+    const meta = JSON.parse(m[1]) as { st?: string; k?: string; sid?: string; tg?: string; rq?: string };
     return {
       notes: raw.slice(m[0].length) || undefined,
       structuralType: meta.st as StructuralEntityType | undefined,
       kind: meta.k as ElementKind | undefined,
       supplierId: meta.sid,
       tags: meta.tg !== undefined ? (meta.tg ? meta.tg.split(',').map((t) => t.trim()).filter(Boolean) : []) : undefined,
+      requirements: meta.rq,
     };
   } catch {
     return { notes: raw };
@@ -398,7 +458,10 @@ function unpackOverlayNotes(raw: string | undefined | null): {
 
 async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<boolean> {
   const client = getProductClient();
-  if (!client?.models?.ProductOverlay) return false;
+  if (!client?.models?.ProductOverlay) {
+    console.warn('[configStore] overlay cloud skipped — no client', entityId);
+    return false;
+  }
   const payload = {
     entityId,
     revision: o.revision,
@@ -409,21 +472,25 @@ async function upsertOverlayCloud(entityId: string, o: EntityOverlay): Promise<b
     modifiedBy: o.modifiedBy,
     lastModified: o.lastModified,
   };
-  try {
-    let result = await client.models.ProductOverlay.update(payload);
-    if (hasErrors(result) || !result?.data) {
-      result = await client.models.ProductOverlay.create(payload);
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      let result = await client.models.ProductOverlay.update(payload);
+      if (hasErrors(result) || !result?.data) {
+        result = await client.models.ProductOverlay.create(payload);
+      }
+      if (hasErrors(result) || !result?.data) {
+        console.error('[configStore] overlay cloud write failed', entityId, result?.errors || result);
+        if (attempt === 2) return false;
+        continue;
+      }
+      console.log('[configStore] overlay cloud ok', entityId);
+      return true;
+    } catch (err) {
+      console.error('[configStore] overlay cloud error', entityId, err);
+      if (attempt === 2) return false;
     }
-    if (hasErrors(result) || !result?.data) {
-      console.error('[configStore] overlay cloud write failed', result?.errors || result);
-      return false;
-    }
-    console.log('[configStore] overlay cloud ok', entityId);
-    return true;
-  } catch (err) {
-    console.error('[configStore] overlay cloud error', err);
-    return false;
   }
+  return false;
 }
 
 function packExtraDescription(entity: ResourceEntity): string | undefined {
@@ -584,6 +651,61 @@ export async function uploadLocalConfigToCloud(): Promise<{ ok: boolean; message
   };
 }
 
+
+// ─── Automatic cloud push (laptop → Amplify) ─────────────────────────────────
+// Debounced full upload after any local change, plus on tab hide.
+// Pushes this browser's current local state. Hydrate uses lastModified so a stale cache cannot clobber a newer team edit.
+
+let autoPushTimer: ReturnType<typeof setTimeout> | null = null;
+let autoPushInFlight = false;
+
+export function scheduleAutoPushToCloud(delayMs = 1500): void {
+  if (autoPushTimer) clearTimeout(autoPushTimer);
+  autoPushTimer = setTimeout(() => {
+    autoPushTimer = null;
+    void runAutoPush();
+  }, delayMs);
+}
+
+async function runAutoPush(): Promise<void> {
+  if (autoPushInFlight) return;
+  const client = getProductClient();
+  if (!client?.models?.ProductOverlay) {
+    console.warn('[configStore] auto-push skipped — Amplify client not ready');
+    return;
+  }
+  autoPushInFlight = true;
+  try {
+    let ok = 0;
+    let fail = 0;
+    for (const [id, o] of Object.entries(state.overlays)) {
+      (await upsertOverlayCloud(id, o)) ? ok++ : fail++;
+    }
+    for (const e of state.extraEntities) {
+      (await upsertExtraEntityCloud(e)) ? ok++ : fail++;
+    }
+    console.log('[configStore] auto-push', fail === 0 ? 'ok' : 'partial', `sent ${ok}` + (fail ? `, ${fail} failed` : ''));
+  } catch (err) {
+    console.error('[configStore] auto-push failed', err);
+  } finally {
+    autoPushInFlight = false;
+  }
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void runAutoPush();
+    if (document.visibilityState === 'visible') void pullFromCloud();
+  });
+  window.addEventListener('pagehide', () => {
+    void runAutoPush();
+  });
+  // Team members see each other's cloud edits without a manual reload.
+  window.setInterval(() => {
+    if (document.visibilityState === 'visible') void pullFromCloud();
+  }, 45000);
+}
+
 // ─── Local merge API ─────────────────────────────────────────────────────────
 
 export function applyOverlay(entity: ResourceEntity): ResourceEntity {
@@ -601,7 +723,8 @@ export function applyOverlay(entity: ResourceEntity): ResourceEntity {
     kind: o.kind !== undefined ? o.kind : entity.kind,
     ...(o.notes !== undefined ? { notes: o.notes } : {}),
     ...(o.tags !== undefined ? { tags: o.tags } : {}),
-  } as ResourceEntity & { notes?: string };
+    ...(o.requirements !== undefined ? { requirements: o.requirements } : {}),
+  } as ResourceEntity & { notes?: string; requirements?: string };
 }
 
 function isRemoved(id: string): boolean {
@@ -756,6 +879,7 @@ export function addChildEntity(
   saveLocal(state);
   notify();
   void upsertExtraEntityCloud(entity);
+  scheduleAutoPushToCloud();
   return applyOverlay(entity);
 }
 
@@ -797,6 +921,7 @@ export function removeChildEntity(entityId: string): ResourceEntity | null {
   saveLocal(state);
   notify();
   persistRemovedIdsCloud();
+  scheduleAutoPushToCloud();
   extrasToDelete.forEach((id) => {
     void deleteExtraEntityCloud(id);
   });
@@ -810,6 +935,7 @@ export function updateEntityFields(
     description?: string;
     notes?: string;
     tags?: string[];
+    requirements?: string;
     modifiedBy?: string;
     type?: StructuralEntityType;
     kind?: ElementKind;
@@ -854,6 +980,7 @@ export function updateEntityFields(
     description: fields.description !== undefined ? fields.description : prev?.description,
     notes: fields.notes !== undefined ? fields.notes : prev?.notes,
     tags: fields.tags !== undefined ? fields.tags : prev?.tags,
+    requirements: fields.requirements !== undefined ? fields.requirements : prev?.requirements,
     structuralType: fields.type !== undefined ? fields.type : prev?.structuralType,
     kind: fields.kind !== undefined ? fields.kind : prev?.kind,
   };
@@ -861,6 +988,7 @@ export function updateEntityFields(
   if (fields.description !== undefined) nextOverlay.description = fields.description;
   if (fields.notes !== undefined) nextOverlay.notes = fields.notes;
   if (fields.tags !== undefined) nextOverlay.tags = fields.tags;
+  if (fields.requirements !== undefined) nextOverlay.requirements = fields.requirements;
   if (fields.type !== undefined) nextOverlay.structuralType = fields.type;
   if (fields.kind !== undefined) nextOverlay.kind = fields.kind;
 
@@ -871,6 +999,7 @@ export function updateEntityFields(
   saveLocal(state);
   notify();
   void upsertOverlayCloud(entityId, nextOverlay);
+  scheduleAutoPushToCloud();
   return getEntityById(entityId) || null;
 }
 
@@ -959,6 +1088,7 @@ export function bumpEntityRevision(
   saveLocal(state);
   notify();
   void upsertOverlayCloud(entityId, nextOverlay);
+  scheduleAutoPushToCloud();
   void createRevisionEventCloud(record);
 
   const entity = getEntityById(entityId);
@@ -998,6 +1128,7 @@ export function createBaseline(input: {
   saveLocal(state);
   notify();
   void createBaselineCloud(baseline);
+  scheduleAutoPushToCloud();
   return baseline;
 }
 

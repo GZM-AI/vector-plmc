@@ -73,13 +73,29 @@ export function documentsForEntity(entityId: string): Document[] {
 
 /** Marker stored on the Document so the card reference image is distinct from other attachments. */
 export const REFERENCE_IMAGE_MARKER = '[[reference-image]]'
+export const REFERENCE_IMAGE_MARKER_2 = '[[reference-image-2]]'
 
 export function isReferenceImage(doc: Document): boolean {
   return (doc.description || '').includes(REFERENCE_IMAGE_MARKER)
 }
 
+export function isReferenceImage2(doc: Document): boolean {
+  return (doc.description || '').includes(REFERENCE_IMAGE_MARKER_2)
+}
+
 export function referenceImageFor(entityId: string): Document | undefined {
   return documentsForEntity(entityId).find(isReferenceImage)
+}
+
+export function referenceImage2For(entityId: string): Document | undefined {
+  return documentsForEntity(entityId).find(isReferenceImage2)
+}
+
+export function referenceImagesFor(entityId: string): { primary?: Document; secondary?: Document } {
+  return {
+    primary: referenceImageFor(entityId),
+    secondary: referenceImage2For(entityId),
+  }
 }
 
 export function getDocumentsError(): string | null {
