@@ -97,6 +97,7 @@ import { PlatformSelector } from '../components/PlatformSelector';
 import { getActiveSystem, subscribePlatform } from '../lib/platformStore';
 import { RequirementsSection } from './RequirementsSection';
 import { MarkdownField, MarkdownView } from '../components/MarkdownField';
+import { exportCardMarkdown, exportCardWord } from '../lib/cardExport';
 import { VendorsSection } from './VendorsSection';
 
 
@@ -1034,6 +1035,51 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             >
               <ArrowUpCircle size={12} />
               {isFormalVersion(entity.revision) ? 'Create new version' : 'Establish Version 1'}
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                exportCardMarkdown({
+                  entity: entity as ResourceEntity & { notes?: string; requirements?: string },
+                  history,
+                  documents: linkedDocs,
+                  vendors: getSuppliersForEntity(entity.id).map((s) => ({ name: s.name, kind: s.kind })),
+                  integrators: integratorChildren.map((c) => ({
+                    name: applyOverlay(c).name,
+                    description: applyOverlay(c).description,
+                  })),
+                  children: (entity.children || []).map((c) => ({
+                    name: applyOverlay(c).name,
+                    type: c.type,
+                  })),
+                })
+              }
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"
+            >
+              <Download size={12} />
+              Export
+            </button>
+            <button
+              type="button"
+              onClick={() =>
+                exportCardWord({
+                  entity: entity as ResourceEntity & { notes?: string; requirements?: string },
+                  history,
+                  documents: linkedDocs,
+                  vendors: getSuppliersForEntity(entity.id).map((s) => ({ name: s.name, kind: s.kind })),
+                  integrators: integratorChildren.map((c) => ({
+                    name: applyOverlay(c).name,
+                    description: applyOverlay(c).description,
+                  })),
+                  children: (entity.children || []).map((c) => ({
+                    name: applyOverlay(c).name,
+                    type: c.type,
+                  })),
+                })
+              }
+              className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"
+            >
+              Word
             </button>
             {canRemoveSelf && pendingRemoveId !== entity.id && (
               <button
