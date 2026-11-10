@@ -34,6 +34,14 @@ import {
   Trash2,
   Download,
   X,
+  Bold,
+  Italic,
+  Underline,
+  List,
+  ListOrdered,
+  Heading2,
+  Link2,
+  Code,
 } from 'lucide-react';
 import { moveChild, sortChildren, subscribeChildOrderStore } from '../lib/childOrderStore';
 import {
@@ -94,16 +102,17 @@ import { VendorsSection } from './VendorsSection';
 /** Lightweight markdown for Notes (no extra dependency). */
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
   const parts: React.ReactNode[] = [];
-  const re = /(\*\*|__)(.+?)\1|(\*|_)(.+?)\3|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  const re = /\+\+(.+?)\+\+|(\*\*|__)(.+?)\2|(\*|_)(.+?)\4|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   let i = 0;
   while ((m = re.exec(text))) {
     if (m.index > last) parts.push(text.slice(last, m.index));
-    if (m[2]) parts.push(<strong key={`${keyPrefix}-b-${i}`}>{m[2]}</strong>);
-    else if (m[4]) parts.push(<em key={`${keyPrefix}-i-${i}`}>{m[4]}</em>);
-    else if (m[5]) parts.push(<code key={`${keyPrefix}-c-${i}`} className="px-1 py-0.5 rounded bg-zinc-900 text-zinc-200 text-[0.9em]">{m[5]}</code>);
-    else if (m[6] && m[7]) parts.push(<a key={`${keyPrefix}-a-${i}`} href={m[7]} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline">{m[6]}</a>);
+    if (m[1]) parts.push(<u key={`${keyPrefix}-u-${i}`}>{m[1]}</u>);
+    else if (m[3]) parts.push(<strong key={`${keyPrefix}-b-${i}`}>{m[3]}</strong>);
+    else if (m[5]) parts.push(<em key={`${keyPrefix}-i-${i}`}>{m[5]}</em>);
+    else if (m[6]) parts.push(<code key={`${keyPrefix}-c-${i}`} className="px-1 py-0.5 rounded bg-zinc-900 text-zinc-200 text-[0.9em]">{m[6]}</code>);
+    else if (m[7] && m[8]) parts.push(<a key={`${keyPrefix}-a-${i}`} href={m[8]} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline">{m[7]}</a>);
     last = m.index + m[0].length;
     i += 1;
   }
@@ -180,6 +189,76 @@ function MarkdownNotes({ source }: { source: string }) {
     blocks.push(<p key={key++} className="my-1">{renderInline(para.join(' '), `p${key}`)}</p>);
   }
   return <div className="text-zinc-300 leading-relaxed text-sm break-words">{blocks}</div>;
+}
+
+
+function applyWrap(value: string, start: number, end: number, before: string, after: string): { value: string; sel: number } {
+  const selected = value.slice(start, end) || 'text';
+  const next = value.slice(0, start) + before + selected + after + value.slice(end);
+  return { value: next, sel: start + before.length + selected.length + after.length };
+}
+
+function applyLinePrefix(value: string, start: number, end: number, prefix: string): { value: string; sel: number } {
+  const from = value.lastIndexOf('\n', start - 1) + 1;
+  const to = end;
+  const block = value.slice(from, to);
+  const lines = block.split('\n');
+  const nextBlock = lines.map((l) => (l.startsWith(prefix) ? l : prefix + l)).join('\n');
+  const next = value.slice(0, from) + nextBlock + value.slice(to);
+  return { value: next, sel: from + nextBlock.length };
+}
+
+function MarkdownField({
+  value,
+  onChange,
+  rows,
+  minHeight,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  rows: number;
+  minHeight: string;
+  placeholder: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  const run = (fn: (v: string, s: number, e: number) => { value: string; sel: number }) => {
+    const el = ref.current;
+    const start = el?.selectionStart ?? value.length;
+    const end = el?.selectionEnd ?? value.length;
+    const result = fn(value, start, end);
+    onChange(result.value);
+    requestAnimationFrame(() => {
+      if (!ref.current) return;
+      ref.current.focus();
+      ref.current.setSelectionRange(result.sel, result.sel);
+    });
+  };
+  const btn = 'p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800';
+  return (
+    <div className="rounded-2xl border border-zinc-600 bg-zinc-950 overflow-hidden">
+      <div className="flex flex-wrap items-center gap-0.5 px-2 py-1.5 border-b border-zinc-800 bg-zinc-900/60">
+        <button type="button" title="Bold" className={btn} onClick={() => run((v, s, e) => applyWrap(v, s, e, '**', '**'))}><Bold size={14} /></button>
+        <button type="button" title="Italic" className={btn} onClick={() => run((v, s, e) => applyWrap(v, s, e, '*', '*'))}><Italic size={14} /></button>
+        <button type="button" title="Underline" className={btn} onClick={() => run((v, s, e) => applyWrap(v, s, e, '++', '++'))}><Underline size={14} /></button>
+        <span className="w-px h-4 bg-zinc-700 mx-1" />
+        <button type="button" title="Heading" className={btn} onClick={() => run((v, s, e) => applyLinePrefix(v, s, e, '## '))}><Heading2 size={14} /></button>
+        <button type="button" title="Bullet list" className={btn} onClick={() => run((v, s, e) => applyLinePrefix(v, s, e, '- '))}><List size={14} /></button>
+        <button type="button" title="Numbered list" className={btn} onClick={() => run((v, s, e) => applyLinePrefix(v, s, e, '1. '))}><ListOrdered size={14} /></button>
+        <span className="w-px h-4 bg-zinc-700 mx-1" />
+        <button type="button" title="Link" className={btn} onClick={() => run((v, s, e) => applyWrap(v, s, e, '[', '](https://)'))}><Link2 size={14} /></button>
+        <button type="button" title="Code" className={btn} onClick={() => run((v, s, e) => applyWrap(v, s, e, '`', '`'))}><Code size={14} /></button>
+      </div>
+      <textarea
+        ref={ref}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        placeholder={placeholder}
+        className={`w-full bg-transparent px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none resize-y ${minHeight}`}
+      />
+    </div>
+  );
 }
 
 type ViewMode = 'overview' | 'tree';
@@ -1363,17 +1442,15 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
         {editing ? (
-          <textarea
+          <MarkdownField
             value={draftDescription}
-            onChange={(e) => setDraftDescription(e.target.value)}
+            onChange={setDraftDescription}
             rows={8}
-            placeholder="Describe this subsystem, component, or software item. Line breaks and paragraphs are kept."
-            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y min-h-[160px]"
+            minHeight="min-h-[160px]"
+            placeholder="Describe this item. Use the toolbar for bold, underline, lists, and links."
           />
         ) : entity.description ? (
-          <div className="text-zinc-300 leading-relaxed text-[15px] whitespace-pre-wrap break-words">
-            {entity.description}
-          </div>
+          <MarkdownNotes source={entity.description} />
         ) : (
           <p className="text-xs text-zinc-600">No description yet. Click Edit details to add one.</p>
         )}
@@ -1382,12 +1459,12 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-2">Notes</h4>
         {editing ? (
-          <textarea
+          <MarkdownField
             value={draftNotes}
-            onChange={(e) => setDraftNotes(e.target.value)}
+            onChange={setDraftNotes}
             rows={14}
-            placeholder="Working notes. Markdown is rendered when saved: headings, **bold**, lists, links, code."
-            className="w-full bg-zinc-950 border border-zinc-600 rounded-2xl px-4 py-3 text-sm text-zinc-200 leading-relaxed whitespace-pre-wrap focus:outline-none focus:border-blue-500 resize-y min-h-[280px]"
+            minHeight="min-h-[280px]"
+            placeholder="Working notes. Use the toolbar for bold, underline, lists, and links."
           />
         ) : (entity as ResourceEntity & { notes?: string }).notes ? (
           <MarkdownNotes source={(entity as ResourceEntity & { notes?: string }).notes || ''} />
