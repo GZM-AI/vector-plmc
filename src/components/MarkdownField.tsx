@@ -1,28 +1,55 @@
 import React, { useRef } from 'react';
 import { Bold, Italic, Underline, List, ListOrdered, Heading2, Link2, Code } from 'lucide-react';
 
+/** Turn mixed toolbar output into clean nested markers before render. */
+function normalizeMarkers(src: string): string {
+  let s = src
+    .replace(/\*\*<u>\*\*([\s\S]+?)\*\*<\/u>\*\*/gi, '**++$1++**')
+    .replace(/<u>\*\*([\s\S]+?)\*\*<\/u>/gi, '**++$1++**')
+    .replace(/\*\*<u>([\s\S]+?)<\/u>\*\*/gi, '**++$1++**')
+    .replace(/<u>([\s\S]+?)<\/u>/gi, '++$1++')
+    .replace(/<\/?u>/gi, '');
+  // A list marker stuck on the same line as prior text becomes its own line
+  s = s.replace(/([^\n])\s+-\s+/g, '$1\n- ');
+  s = s.replace(/([^\n])\s+\*\s+/g, '$1\n- ');
+  return s;
+}
+
 function renderInline(text: string, keyPrefix: string): React.ReactNode[] {
-  const parts: React.ReactNode[] = [];
-  const re = /\+\+(.+?)\+\+|<u>(.+?)<\/u>|(\*\*|__)(.+?)\3|(\*|_)(.+?)\5|`([^`]+)`|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
-  let last = 0;
-  let m: RegExpExecArray | null;
-  let i = 0;
-  while ((m = re.exec(text))) {
-    if (m.index > last) parts.push(text.slice(last, m.index));
-    if (m[1] || m[2]) parts.push(<u key={`${keyPrefix}-u-${i}`} className="underline">{m[1] || m[2]}</u>);
-    else if (m[4]) parts.push(<strong key={`${keyPrefix}-b-${i}`}>{m[4]}</strong>);
-    else if (m[6]) parts.push(<em key={`${keyPrefix}-i-${i}`}>{m[6]}</em>);
-    else if (m[7]) parts.push(<code key={`${keyPrefix}-c-${i}`} className="px-1 py-0.5 rounded bg-zinc-900 text-zinc-200 text-[0.9em]">{m[7]}</code>);
-    else if (m[8] && m[9]) parts.push(<a key={`${keyPrefix}-a-${i}`} href={m[9]} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline">{m[8]}</a>);
-    last = m.index + m[0].length;
-    i += 1;
+  if (!text) return [];
+  type Hit = { index: number; len: number; kind: string; inner: string; href?: string };
+  const specs: { kind: string; re: RegExp }[] = [
+    { kind: 'u', re: /\+\+([\s\S]+?)\+\+/ },
+    { kind: 'b', re: /\*\*([\s\S]+?)\*\*/ },
+    { kind: 'b', re: /__([\s\S]+?)__/ },
+    { kind: 'i', re: /\*([^*\n]+)\*/ },
+    { kind: 'c', re: /`([^`]+)`/ },
+    { kind: 'a', re: /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/ },
+  ];
+  let best: Hit | null = null;
+  for (const s of specs) {
+    const m = s.re.exec(text);
+    if (!m) continue;
+    if (!best || m.index < best.index) {
+      best = { index: m.index, len: m[0].length, kind: s.kind, inner: m[1], href: m[2] };
+    }
   }
-  if (last < text.length) parts.push(text.slice(last));
-  return parts;
+  if (!best) return [text];
+  const before = text.slice(0, best.index);
+  const after = text.slice(best.index + best.len);
+  const k = `${keyPrefix}-${best.index}`;
+  const inner = renderInline(best.inner, k);
+  let node: React.ReactNode = inner;
+  if (best.kind === 'u') node = <u key={k} className="underline">{inner}</u>;
+  else if (best.kind === 'b') node = <strong key={k}>{inner}</strong>;
+  else if (best.kind === 'i') node = <em key={k}>{inner}</em>;
+  else if (best.kind === 'c') node = <code key={k} className="px-1 py-0.5 rounded bg-zinc-900 text-zinc-200 text-[0.9em]">{best.inner}</code>;
+  else if (best.kind === 'a') node = <a key={k} href={best.href} target="_blank" rel="noreferrer" className="text-blue-400 hover:text-blue-300 underline">{best.inner}</a>;
+  return [...renderInline(before, `${keyPrefix}b`), node, ...renderInline(after, `${keyPrefix}a`)];
 }
 
 export function MarkdownView({ source }: { source: string }) {
-  const lines = (source || '').replace(/\r\n/g, '\n').split('\n');
+  const lines = normalizeMarkers(source || '').replace(/\r\n/g, '\n').split('\n');
   const blocks: React.ReactNode[] = [];
   let i = 0;
   let key = 0;
@@ -58,20 +85,20 @@ export function MarkdownView({ source }: { source: string }) {
         i += 1;
       }
       blocks.push(
-        <ul key={key++} className="list-disc pl-5 my-1 space-y-0.5">
+        <ul key={key++} className="list-disc pl-5 my-2 space-y-1 marker:text-zinc-400">
           {items.map((item, idx) => <li key={idx}>{renderInline(item, `ul${key}-${idx}`)}</li>)}
         </ul>
       );
       continue;
     }
-    if (/^\s*\d+\.\s+/.test(line)) {
+    if (/^\s*\d+[.)]\s+/.test(line)) {
       const items: string[] = [];
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+[.)]\s+/, ''));
         i += 1;
       }
       blocks.push(
-        <ol key={key++} className="list-decimal pl-5 my-1 space-y-0.5">
+        <ol key={key++} className="list-decimal pl-5 my-2 space-y-1 marker:text-zinc-400">
           {items.map((item, idx) => <li key={idx}>{renderInline(item, `ol${key}-${idx}`)}</li>)}
         </ol>
       );
@@ -83,7 +110,7 @@ export function MarkdownView({ source }: { source: string }) {
     }
     const para: string[] = [line];
     i += 1;
-    while (i < lines.length && lines[i].trim() && !/^(#{1,3}\s|```|\s*[-*]\s|\s*\d+\.\s)/.test(lines[i])) {
+    while (i < lines.length && lines[i].trim() && !/^(#{1,3}\s|```|\s*[-*]\s|\s*\d+[.)]\s)/.test(lines[i])) {
       para.push(lines[i]);
       i += 1;
     }
