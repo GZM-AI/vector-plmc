@@ -69,8 +69,6 @@ import {
   REFERENCE_IMAGE_1,
   REFERENCE_IMAGE_2,
   isReferenceImage,
-  captionFromReference,
-  updateDocumentCaption,
   openAttachedDocument,
   previewAttachedDocument,
   type DocumentPreview,
@@ -99,6 +97,7 @@ import {
   getEntityById,
   isEntityDirty,
   decodeChangesSummary,
+  setImageCaption,
   type AddableChildType,
 } from '../lib/configStore';
 import { nextRevision, isUnversioned, isFormalVersion, UNVERSIONED } from '../lib/revisionUtils';
@@ -131,8 +130,10 @@ function ReferenceImagePane({
   useEffect(() => subscribeDocumentsStore(() => setTick((t) => t + 1)), []);
   const doc = useMemo(() => referenceImagesFor(entityId)[slot], [entityId, slot, tick]);
   useEffect(() => {
-    setCaption(captionFromReference(doc));
-  }, [doc?.id, doc?.description]);
+    const entity = getEntityById(entityId) as (ResourceEntity & { imageCaptions?: { i1?: string; i2?: string } }) | undefined;
+    const key = slot === 'slot1' ? 'i1' : 'i2';
+    setCaption(entity?.imageCaptions?.[key] || '');
+  }, [entityId, slot, tick]);
   useEffect(() => {
     let cancelled = false;
     if (!doc) {
@@ -179,20 +180,15 @@ function ReferenceImagePane({
           <div className="w-[400px] max-w-full h-[250px] rounded-xl border border-zinc-700 bg-black/30 overflow-hidden flex items-center justify-center">
             <img src={url} alt={label} className="w-full h-full object-contain" />
           </div>
-          <textarea
+          <input
             value={caption}
             onChange={(e) => setCaption(e.target.value)}
             onBlur={() => {
-              if (!doc) return;
-              const next = caption.trim();
-              if (next === captionFromReference(doc)) return;
-              void updateDocumentCaption(doc.id, marker, next).catch((e) =>
-                setErr(e instanceof Error ? e.message : String(e))
-              );
+              const key = slot === 'slot1' ? 'i1' : 'i2';
+              setImageCaption(entityId, key, caption);
             }}
-            rows={2}
-            placeholder="Info under this image"
-            className="mt-2 w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500 resize-y"
+            placeholder="Optional caption"
+            className="mt-1.5 w-full bg-transparent border-0 px-0.5 py-1 text-xs text-zinc-400 placeholder:text-zinc-600 focus:outline-none focus:text-zinc-200"
           />
           <div className="mt-2 flex items-center gap-2">
             <button
