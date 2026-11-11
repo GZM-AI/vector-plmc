@@ -1,23 +1,21 @@
 /**
- * Documents / attachments — team-shared (cloud-first, cloud-only for new files)
+ * Documents / attachments — team-shared (cloud-first)
  *
  * Bytes:  Amplify Storage  documents/{documentId}/{fileName}
  * Meta:   Amplify Data Document (userPool only — no API key)
- * Cache:  localStorage vector-plm-documents-v1 (list only)
+ * Cache:  localStorage vector-plm-documents-v1
  *
- * New attachments require a signed-in user and are written only to Amplify Storage
- * + Document. Older local: records (if any) still open from the browser cache.
- * Multiple files per entity are supported via linkedEntityIds.
+ * Not device-local. Anyone signed into the shared pool sees the same
+ * attachments on the same Registry entity.
  */
 import { generateClient } from 'aws-amplify/data'
-import { getCurrentUser, fetchAuthSession } from 'aws-amplify/auth'
+import { getCurrentUser } from 'aws-amplify/auth'
 import { uploadData, getUrl, remove as removeStorage } from 'aws-amplify/storage'
 import type { Schema } from '../../amplify/data/resource'
 import type { Document, DocumentKind, ReleaseStatus } from '../types/plm'
 
 const CACHE_KEY = 'vector-plm-documents-v1'
 const BYTES_KEY = 'vector-plm-doc-bytes-v1'
-const ATTACH_KEY = 'vector-attachments-v1'
 const MAX_BYTES = 80 * 1024 * 1024
 const MAX_INLINE = 4 * 1024 * 1024
 
@@ -71,32 +69,27 @@ export function documentsForEntity(entityId: string): Document[] {
   return state.documents.filter((d) => d.linkedEntityIds.includes(entityId))
 }
 
-/** Marker stored on the Document so the card reference image is distinct from other attachments. */
-export const REFERENCE_IMAGE_MARKER = '[[reference-image]]'
-export const REFERENCE_IMAGE_MARKER_2 = '[[reference-image-2]]'
 
-export function isReferenceImage(doc: Document): boolean {
-  return (doc.description || '').includes(REFERENCE_IMAGE_MARKER)
+export const REFERENCE_IMAGE_MARKER = '[[reference-image]]';
+export const REFERENCE_IMAGE_1 = '[[reference-image-1]]';
+export const REFERENCE_IMAGE_2 = '[[reference-image-2]]';
+
+export function isReferenceImage(doc: { description?: string }): boolean {
+  const d = doc.description || '';
+  return d.includes(REFERENCE_IMAGE_MARKER) || d.includes(REFERENCE_IMAGE_1) || d.includes(REFERENCE_IMAGE_2);
 }
 
-export function isReferenceImage2(doc: Document): boolean {
-  return (doc.description || '').includes(REFERENCE_IMAGE_MARKER_2)
+export function referenceImagesFor(entityId: string): { slot1?: Document; slot2?: Document } {
+  const docs = documentsForEntity(entityId).filter(isReferenceImage);
+  const slot2 = docs.find((d) => (d.description || '').includes(REFERENCE_IMAGE_2));
+  const slot1 = docs.find(
+    (d) =>
+      d.id !== slot2?.id &&
+      ((d.description || '').includes(REFERENCE_IMAGE_1) || (d.description || '').includes(REFERENCE_IMAGE_MARKER))
+  );
+  return { slot1, slot2 };
 }
 
-export function referenceImageFor(entityId: string): Document | undefined {
-  return documentsForEntity(entityId).find(isReferenceImage)
-}
-
-export function referenceImage2For(entityId: string): Document | undefined {
-  return documentsForEntity(entityId).find(isReferenceImage2)
-}
-
-export function referenceImagesFor(entityId: string): { primary?: Document; secondary?: Document } {
-  return {
-    primary: referenceImageFor(entityId),
-    secondary: referenceImage2For(entityId),
-  }
-}
 
 export function getDocumentsError(): string | null {
   return state.lastError
@@ -211,83 +204,38 @@ async function currentUserLabel(): Promise<string> {
 }
 
 function isDocsAuthError(msg: string): boolean {
-  return /unauthorized|not authorized|unauthenticated|No current user|UserUnAuthenticated/i.test(msg)
-}
-
-type AttachmentIndex = {
-  documents: Document[]
-  hiddenIds: string[]
-}
-
-async function loadAttachmentIndex(): Promise<AttachmentIndex> {
-  const client = dataClient('apiKey')
-  const { data, errors } = await client.models.MapLayout.get({ layoutKey: ATTACH_KEY })
-  if (errors?.length || !data?.hotspotsJson) return { documents: [], hiddenIds: [] }
-  try {
-    const parsed = JSON.parse(String(data.hotspotsJson)) as Partial<AttachmentIndex>
-    return {
-      documents: Array.isArray(parsed.documents) ? parsed.documents : [],
-      hiddenIds: Array.isArray(parsed.hiddenIds) ? parsed.hiddenIds : [],
-    }
-  } catch {
-    return { documents: [], hiddenIds: [] }
-  }
-}
-
-async function saveAttachmentIndex(index: AttachmentIndex): Promise<void> {
-  const client = dataClient('apiKey')
-  const payload = {
-    layoutKey: ATTACH_KEY,
-    hotspotsJson: JSON.stringify(index),
-    updatedBy: await currentUserLabel(),
-  }
-  let result = await client.models.MapLayout.update(payload)
-  if (result.errors?.length) {
-    result = await client.models.MapLayout.create(payload)
-  }
-  if (result.errors?.length) {
-    throw new Error(result.errors[0].message || 'Could not save attachment index')
-  }
+  return /not authorized to access listDocuments/i.test(msg)
 }
 
 export async function hydrateDocumentsStoreFromCloud(): Promise<void> {
   try {
-    const index = await loadAttachmentIndex()
-    const hidden = new Set(index.hiddenIds)
-    const byId = new Map<string, Document>()
-    for (const doc of index.documents) {
-      if (doc?.id && !hidden.has(doc.id)) byId.set(doc.id, doc)
+    const authed = await signedIn()
+    if (!authed) {
+      state.hydrated = true
+      if (state.lastError && isDocsAuthError(state.lastError)) state.lastError = null
+      emit()
+      return
     }
-
-    const modes: Array<'apiKey' | 'userPool'> = ['apiKey', 'userPool']
-    for (const mode of modes) {
-      try {
-        const client = dataClient(mode)
-        const { data, errors } = await client.models.Document.list({ limit: 1000 })
-        if (errors?.length) {
-          if (isDocsAuthError(errors[0].message || '')) continue
-          break
-        }
-        for (const row of data || []) {
-          const doc = fromRow(row as unknown as Record<string, unknown>)
-          if (doc && !hidden.has(doc.id)) byId.set(doc.id, doc)
-        }
-        break
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err)
-        if (isDocsAuthError(msg)) continue
-        break
-      }
+    const client = dataClient('userPool')
+    const { data, errors } = await client.models.Document.list({ limit: 1000 })
+    if (errors?.length) {
+      const msg = errors[0].message || 'Document list failed'
+      state.lastError = isDocsAuthError(msg) ? null : msg
+      emit()
+      return
     }
-
+    const docs = (data || [])
+      .map((row) => fromRow(row as unknown as Record<string, unknown>))
+      .filter((d): d is Document => !!d)
+    const byId = new Map(docs.map((d) => [d.id, d]))
     for (const local of state.documents) {
-      if (!hidden.has(local.id) && !byId.has(local.id)) byId.set(local.id, local)
+      if (!byId.has(local.id)) byId.set(local.id, local)
     }
     state.documents = [...byId.values()]
     state.hydrated = true
     state.lastError = null
     emit()
-    console.log('[documentsStore] hydrated', state.documents.length)
+    console.log('[documentsStore] hydrated', docs.length)
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
     state.lastError = isDocsAuthError(msg) ? null : msg
@@ -306,57 +254,46 @@ export async function attachDocumentToEntity(
     throw new Error(`File is too large (${Math.round(file.size / 1048576)} MB). Max is 80 MB.`)
   }
 
-  const authed = await signedIn()
-  if (!authed) {
-    throw new Error('Sign in first — attachments are stored in the team cloud, not on this device.')
-  }
-
   const id = `doc-${crypto.randomUUID()}`
   const fileName = safeFileName(file.name)
-  // Card files live in attachments/, not next to the platform GLBs under models/.
-  // AWS-USER-POOL-authenticated must allow s3:PutObject on attachments/* (same
-  // kind of inline policy as VectorModelsAccess on models/*).
-  const storageKey = `attachments/${id}/${fileName}`
+  let storageKey = `documents/${id}/${fileName}`
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
   const kind = opts?.kind || inferKind(file)
   const name = (opts?.name || file.name.replace(/\.[^.]+$/, '') || file.name).trim()
   const contentType = file.type || 'application/octet-stream'
+  const authed = await signedIn()
+  let cloudFile = false
 
-  const session = await fetchAuthSession({ forceRefresh: true })
-  if (!session.credentials) {
-    throw new Error(
-      'Signed in, but Amplify Storage did not issue credentials. The identity pool is not accepting this app client.'
-    )
-  }
-
-  let uploaded = false
-  let lastErr: unknown = null
-  const attempts: Array<Record<string, unknown>> = [
-    {
-      path: storageKey,
-      data: file,
-      options: { contentType, bucket: 'vectorPlmDocuments' },
-    },
-    {
-      path: storageKey,
-      data: file,
-      options: { contentType },
-    },
-  ]
-  for (const input of attempts) {
+  if (authed) {
     try {
-      await (uploadData as (i: Record<string, unknown>) => { result: Promise<unknown> })(input).result
-      uploaded = true
-      break
-    } catch (err) {
-      lastErr = err
+      await uploadData({
+        path: storageKey,
+        data: file,
+        options: { contentType },
+      }).result
+      cloudFile = true
+    } catch (pathErr) {
+      try {
+        await (uploadData as (input: Record<string, unknown>) => { result: Promise<unknown> })({
+          key: storageKey,
+          data: file,
+          options: { contentType },
+        }).result
+        cloudFile = true
+      } catch {
+        console.warn('[documentsStore] storage upload failed', pathErr)
+      }
     }
   }
-  if (!uploaded) {
-    const detail = lastErr instanceof Error ? lastErr.message : String(lastErr)
-    console.warn('[documentsStore] storage upload failed', lastErr)
-    throw new Error(`Cloud upload failed: ${detail}`)
+
+  if (!cloudFile) {
+    storageKey = `local:${id}`
+    try {
+      await saveLocalBytes(id, file)
+    } catch (e) {
+      console.warn('[documentsStore] local byte cache failed', e)
+    }
   }
 
   const record: Document = {
@@ -396,50 +333,33 @@ export async function attachDocumentToEntity(
     modifiedBy,
   }
 
-  const modes: Array<'userPool' | 'apiKey'> = ['userPool', 'apiKey']
+  const modes: Array<'userPool' | 'apiKey'> = authed ? ['userPool', 'apiKey'] : ['apiKey']
+  let savedCloud = false
+  let lastMetaErr = ''
   for (const mode of modes) {
     try {
       const client = dataClient(mode)
       const { errors } = await client.models.Document.create(payload)
-      if (!errors?.length) break
-    } catch {
-      /* Document model is still private on the live API */
+      if (!errors?.length) {
+        savedCloud = true
+        break
+      }
+      lastMetaErr = errors[0].message || `${mode} create failed`
+    } catch (err) {
+      lastMetaErr = err instanceof Error ? err.message : String(err)
     }
   }
-
-  const index = await loadAttachmentIndex()
-  index.documents = [record, ...index.documents.filter((d) => d.id !== id)]
-  index.hiddenIds = index.hiddenIds.filter((hid) => hid !== id)
-  await saveAttachmentIndex(index)
 
   state.documents = [record, ...state.documents.filter((d) => d.id !== id)]
-  state.lastError = null
+  state.lastError = savedCloud
+    ? null
+    : lastMetaErr
+      ? `Saved on this browser. Cloud: ${lastMetaErr}`
+      : authed
+        ? null
+        : 'Saved on this browser. Sign in to push attachments to team Storage.'
   emit()
   return record
-}
-
-export async function attachDocumentsToEntity(
-  entityId: string,
-  files: File[],
-  opts?: { kind?: DocumentKind; description?: string }
-): Promise<Document[]> {
-  const results: Document[] = []
-  const errors: string[] = []
-  for (const file of files) {
-    try {
-      results.push(await attachDocumentToEntity(entityId, file, opts))
-    } catch (err) {
-      errors.push(`${file.name}: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-  if (errors.length && results.length === 0) {
-    throw new Error(errors.join(' · '))
-  }
-  if (errors.length) {
-    state.lastError = errors.join(' · ')
-    emit()
-  }
-  return results
 }
 
 function dataUrlToBlobUrl(dataUrl: string): string {
@@ -674,43 +594,21 @@ export async function getDocumentDownloadUrl(doc: Document): Promise<string> {
   }
 }
 
-async function mutateDocument(
-  run: (mode: 'apiKey' | 'userPool') => Promise<{ errors?: { message?: string }[] | null }>
-): Promise<void> {
-  const modes: Array<'apiKey' | 'userPool'> = ['apiKey', 'userPool']
-  let last = 'Delete failed'
-  for (const mode of modes) {
-    try {
-      const { errors } = await run(mode)
-      if (!errors?.length) return
-      last = errors[0].message || last
-      if (!isDocsAuthError(last)) break
-    } catch (err) {
-      last = err instanceof Error ? err.message : String(err)
-      if (!isDocsAuthError(last)) break
-    }
-  }
-  throw new Error(
-    isDocsAuthError(last)
-      ? 'The Document API rejected this delete. You are signed in, but AppSync still has Document as authenticated-only and is not accepting this session. A backend deploy is required.'
-      : last
-  )
-}
-
 export async function unlinkDocumentFromEntity(documentId: string, entityId: string): Promise<void> {
   const existing = state.documents.find((d) => d.id === documentId)
   if (!existing) return
   const linked = existing.linkedEntityIds.filter((id) => id !== entityId)
   const now = new Date().toISOString()
   const modifiedBy = await currentUserLabel()
-  await mutateDocument((mode) =>
-    dataClient(mode).models.Document.update({
-      id: documentId,
-      linkedEntityIdsJson: JSON.stringify(linked),
-      lastModified: now,
-      modifiedBy,
-    })
-  )
+  const mode = (await signedIn()) ? 'userPool' : 'apiKey'
+  const client = dataClient(mode)
+  const { errors } = await client.models.Document.update({
+    id: documentId,
+    linkedEntityIdsJson: JSON.stringify(linked),
+    lastModified: now,
+    modifiedBy,
+  })
+  if (errors?.length) throw new Error(errors[0].message || 'Unlink failed')
   state.documents = state.documents.map((d) =>
     d.id === documentId ? { ...d, linkedEntityIds: linked, lastModified: now, modifiedBy } : d
   )
@@ -719,24 +617,16 @@ export async function unlinkDocumentFromEntity(documentId: string, entityId: str
 
 export async function deleteDocument(documentId: string): Promise<void> {
   const existing = state.documents.find((d) => d.id === documentId)
-  if (existing?.storageKey && !existing.storageKey.startsWith('local:')) {
+  const client = dataClient()
+  if (existing?.storageKey) {
     try {
       await removeStorage({ path: existing.storageKey })
     } catch (err) {
       console.warn('[documentsStore] storage delete failed', err)
     }
   }
-  try {
-    await mutateDocument((mode) => dataClient(mode).models.Document.delete({ id: documentId }))
-  } catch (err) {
-    console.warn('[documentsStore] Document.delete skipped', err)
-  }
-  const index = await loadAttachmentIndex()
-  index.documents = index.documents.filter((d) => d.id !== documentId)
-  if (!index.hiddenIds.includes(documentId)) index.hiddenIds.push(documentId)
-  await saveAttachmentIndex(index)
+  const { errors } = await client.models.Document.delete({ id: documentId })
+  if (errors?.length) throw new Error(errors[0].message || 'Delete failed')
   state.documents = state.documents.filter((d) => d.id !== documentId)
-  state.lastError = null
   emit()
 }
-

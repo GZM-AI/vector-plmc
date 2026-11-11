@@ -34,6 +34,7 @@ import {
   Trash2,
   Download,
   X,
+  Image,
   Bold,
   Italic,
   Underline,
@@ -62,6 +63,12 @@ import {
   documentsForEntity,
   subscribeDocumentsStore,
   attachDocumentToEntity,
+  getDocumentDownloadUrl,
+  deleteDocument,
+  referenceImagesFor,
+  REFERENCE_IMAGE_1,
+  REFERENCE_IMAGE_2,
+  isReferenceImage,
   openAttachedDocument,
   previewAttachedDocument,
   type DocumentPreview,
@@ -100,6 +107,127 @@ import { MarkdownField, MarkdownView } from '../components/MarkdownField';
 import { exportCardMarkdown, exportCardWord } from '../lib/cardExport';
 import { VendorsSection } from './VendorsSection';
 
+
+
+function ReferenceImagePane({
+  entityId,
+  slot,
+  marker,
+  label,
+}: {
+  entityId: string;
+  slot: 'slot1' | 'slot2';
+  marker: string;
+  label: string;
+}) {
+  const [tick, setTick] = useState(0);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [url, setUrl] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => subscribeDocumentsStore(() => setTick((t) => t + 1)), []);
+  const doc = useMemo(() => referenceImagesFor(entityId)[slot], [entityId, slot, tick]);
+  useEffect(() => {
+    let cancelled = false;
+    if (!doc) {
+      setUrl(null);
+      return;
+    }
+    void getDocumentDownloadUrl(doc)
+      .then((u) => {
+        if (!cancelled) setUrl(u);
+      })
+      .catch(() => {
+        if (!cancelled) setUrl(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [doc?.id, doc?.storageKey]);
+  const onFile = async (file: File | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setErr('Choose an image file.');
+      return;
+    }
+    setBusy(true);
+    setErr(null);
+    try {
+      if (doc) await deleteDocument(doc.id);
+      await attachDocumentToEntity(entityId, file, {
+        name: file.name.replace(/\.[^.]+$/, '') || label,
+        kind: 'photo',
+        description: marker,
+      });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="w-full max-w-[400px]">
+      <div className="text-[11px] text-zinc-500 mb-1">{label}</div>
+      <div className="w-[400px] max-w-full h-[250px] rounded-xl border border-zinc-700 bg-black/30 overflow-hidden flex items-center justify-center">
+        {url ? (
+          <img src={url} alt={label} className="w-full h-full object-contain" />
+        ) : (
+          <span className="text-xs text-zinc-600">No image</span>
+        )}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => inputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+        >
+          <Image size={12} />
+          {busy ? 'Uploading…' : url ? 'Replace' : 'Add image'}
+        </button>
+        {doc && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => {
+              setBusy(true);
+              void deleteDocument(doc.id)
+                .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+                .finally(() => setBusy(false));
+            }}
+            className="text-[11px] text-zinc-500 hover:text-red-300 disabled:opacity-40"
+          >
+            Remove
+          </button>
+        )}
+      </div>
+      {err && <p className="text-[11px] text-amber-300 mt-1">{err}</p>}
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = '';
+          void onFile(file);
+        }}
+      />
+    </div>
+  );
+}
+
+function ReferenceImages({ entityId }: { entityId: string }) {
+  return (
+    <div className="mb-6">
+      <h4 className="text-sm font-medium text-blue-400 mb-3">Images</h4>
+      <div className="flex flex-wrap gap-4">
+        <ReferenceImagePane entityId={entityId} slot="slot1" marker={REFERENCE_IMAGE_1} label="Image 1" />
+        <ReferenceImagePane entityId={entityId} slot="slot2" marker={REFERENCE_IMAGE_2} label="Image 2" />
+      </div>
+    </div>
+  );
+}
 
 type ViewMode = 'overview' | 'tree';
 
@@ -646,7 +774,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   };
 
   const linkedDocs: Document[] = useMemo(
-    () => documentsForEntity(entity.id),
+    () => documentsForEntity(entity.id).filter((d) => !isReferenceImage(d)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [entity.id, docsTick]
   );
@@ -1323,6 +1451,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
           )}
         </div>
       )}
+
+      <ReferenceImages entityId={entity.id} />
 
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-2">Description</h4>
