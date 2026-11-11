@@ -166,41 +166,49 @@ function ReferenceImagePane({
     }
   };
   return (
-    <div className="w-full max-w-[400px]">
-      <div className="text-[11px] text-zinc-500 mb-1">{label}</div>
-      <div className="w-[400px] max-w-full h-[250px] rounded-xl border border-zinc-700 bg-black/30 overflow-hidden flex items-center justify-center">
-        {url ? (
-          <img src={url} alt={label} className="w-full h-full object-contain" />
-        ) : (
-          <span className="text-xs text-zinc-600">No image</span>
-        )}
-      </div>
-      <div className="mt-2 flex items-center gap-2">
+    <div className={url ? 'w-full max-w-[400px]' : ''}>
+      {url ? (
+        <>
+          <div className="text-[11px] text-zinc-500 mb-1">{label}</div>
+          <div className="w-[400px] max-w-full h-[250px] rounded-xl border border-zinc-700 bg-black/30 overflow-hidden flex items-center justify-center">
+            <img src={url} alt={label} className="w-full h-full object-contain" />
+          </div>
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => inputRef.current?.click()}
+              className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+            >
+              <Image size={12} />
+              {busy ? 'Uploading…' : 'Replace'}
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setBusy(true);
+                void deleteDocument(doc!.id)
+                  .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+                  .finally(() => setBusy(false));
+              }}
+              className="text-[11px] text-zinc-500 hover:text-red-300 disabled:opacity-40"
+            >
+              Remove
+            </button>
+          </div>
+        </>
+      ) : (
         <button
           type="button"
           disabled={busy}
           onClick={() => inputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-300 hover:border-zinc-500 disabled:opacity-40"
+          className="inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg bg-zinc-900 border border-zinc-700 text-zinc-400 hover:text-zinc-200 hover:border-zinc-500 disabled:opacity-40"
         >
           <Image size={12} />
-          {busy ? 'Uploading…' : url ? 'Replace' : 'Add image'}
+          {busy ? 'Uploading…' : `Add ${label.toLowerCase()}`}
         </button>
-        {doc && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              void deleteDocument(doc.id)
-                .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
-                .finally(() => setBusy(false));
-            }}
-            className="text-[11px] text-zinc-500 hover:text-red-300 disabled:opacity-40"
-          >
-            Remove
-          </button>
-        )}
-      </div>
+      )}
       {err && <p className="text-[11px] text-amber-300 mt-1">{err}</p>}
       <input
         ref={inputRef}
@@ -219,9 +227,8 @@ function ReferenceImagePane({
 
 function ReferenceImages({ entityId }: { entityId: string }) {
   return (
-    <div className="mb-6">
-      <h4 className="text-sm font-medium text-blue-400 mb-3">Images</h4>
-      <div className="flex flex-wrap gap-4">
+    <div className="mb-4">
+      <div className="flex flex-wrap items-start gap-3">
         <ReferenceImagePane entityId={entityId} slot="slot1" marker={REFERENCE_IMAGE_1} label="Image 1" />
         <ReferenceImagePane entityId={entityId} slot="slot2" marker={REFERENCE_IMAGE_2} label="Image 2" />
       </div>
