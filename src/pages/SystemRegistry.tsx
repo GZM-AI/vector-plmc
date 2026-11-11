@@ -188,7 +188,7 @@ function ReferenceImagePane({
               setImageCaption(entityId, key, caption);
             }}
             placeholder="Optional caption"
-            className="mt-1.5 w-full bg-transparent border-0 px-0.5 py-1 text-xs text-zinc-400 placeholder:text-zinc-600 focus:outline-none focus:text-zinc-200"
+            className="mt-1.5 w-full bg-transparent border-0 px-0.5 py-1 text-xs text-center text-zinc-400 placeholder:text-zinc-600 focus:outline-none focus:text-zinc-200"
           />
           <div className="mt-2 flex items-center gap-2">
             <button
