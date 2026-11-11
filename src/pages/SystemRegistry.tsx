@@ -69,6 +69,8 @@ import {
   REFERENCE_IMAGE_1,
   REFERENCE_IMAGE_2,
   isReferenceImage,
+  captionFromReference,
+  updateDocumentCaption,
   openAttachedDocument,
   previewAttachedDocument,
   type DocumentPreview,
@@ -124,9 +126,13 @@ function ReferenceImagePane({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [url, setUrl] = useState<string | null>(null);
+  const [caption, setCaption] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   useEffect(() => subscribeDocumentsStore(() => setTick((t) => t + 1)), []);
   const doc = useMemo(() => referenceImagesFor(entityId)[slot], [entityId, slot, tick]);
+  useEffect(() => {
+    setCaption(captionFromReference(doc));
+  }, [doc?.id, doc?.description]);
   useEffect(() => {
     let cancelled = false;
     if (!doc) {
@@ -173,6 +179,21 @@ function ReferenceImagePane({
           <div className="w-[400px] max-w-full h-[250px] rounded-xl border border-zinc-700 bg-black/30 overflow-hidden flex items-center justify-center">
             <img src={url} alt={label} className="w-full h-full object-contain" />
           </div>
+          <textarea
+            value={caption}
+            onChange={(e) => setCaption(e.target.value)}
+            onBlur={() => {
+              if (!doc) return;
+              const next = caption.trim();
+              if (next === captionFromReference(doc)) return;
+              void updateDocumentCaption(doc.id, marker, next).catch((e) =>
+                setErr(e instanceof Error ? e.message : String(e))
+              );
+            }}
+            rows={2}
+            placeholder="Info under this image"
+            className="mt-2 w-full bg-zinc-950 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500 resize-y"
+          />
           <div className="mt-2 flex items-center gap-2">
             <button
               type="button"

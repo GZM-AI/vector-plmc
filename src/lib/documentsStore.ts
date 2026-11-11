@@ -615,6 +615,36 @@ export async function unlinkDocumentFromEntity(documentId: string, entityId: str
   emit()
 }
 
+
+export function captionFromReference(doc: { description?: string } | undefined): string {
+  if (!doc?.description) return '';
+  return doc.description
+    .replace(REFERENCE_IMAGE_1, '')
+    .replace(REFERENCE_IMAGE_2, '')
+    .replace(REFERENCE_IMAGE_MARKER, '')
+    .trim();
+}
+
+export async function updateDocumentCaption(documentId: string, marker: string, caption: string): Promise<void> {
+  const existing = state.documents.find((d) => d.id === documentId);
+  if (!existing) return;
+  const description = `${marker}\n${caption.trim()}`.trim();
+  const now = new Date().toISOString();
+  const modifiedBy = await currentUserLabel();
+  const client = dataClient();
+  const { errors } = await client.models.Document.update({
+    id: documentId,
+    description,
+    lastModified: now,
+    modifiedBy,
+  });
+  if (errors?.length) throw new Error(errors[0].message || 'Caption save failed');
+  state.documents = state.documents.map((d) =>
+    d.id === documentId ? { ...d, description, lastModified: now, modifiedBy } : d
+  );
+  emit();
+}
+
 export async function deleteDocument(documentId: string): Promise<void> {
   const existing = state.documents.find((d) => d.id === documentId)
   const client = dataClient()
