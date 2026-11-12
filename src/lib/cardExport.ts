@@ -14,6 +14,7 @@ export type CardExportInput = {
   vendors: { name: string; kind?: string }[];
   integrators: { name: string; description?: string }[];
   children: { name: string; type: string }[];
+  referenceImages?: { slot: string; name?: string; caption?: string }[];
 };
 
 function slug(s: string): string {
@@ -65,6 +66,15 @@ export function cardToMarkdown(input: CardExportInput): string {
     section('Description', e.description),
     section('Notes', e.notes),
     section('Requirements', e.requirements),
+    `## Reference images`,
+    '',
+    list(
+      (input.referenceImages || []).map((img) => {
+        const name = img.name || img.slot;
+        return img.caption ? `${img.slot}: ${name} — ${img.caption}` : `${img.slot}: ${name}`;
+      })
+    ),
+    '',
     `## Tags`,
     '',
     list(e.tags || []),
