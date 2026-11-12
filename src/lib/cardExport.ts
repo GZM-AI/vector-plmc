@@ -118,7 +118,11 @@ export function exportCardMarkdown(input: CardExportInput): void {
 }
 
 function xmlEscape(s: string): string {
-  return s.replace(/&/g, '&').replace(/</g, '<').replace(/>/g, '>').replace(/"/g, '"');
+  return s
+    .replace(/&/g, '&')
+    .replace(/</g, '<')
+    .replace(/>/g, '>')
+    .replace(/"/g, '"');
 }
 
 function crc32(bytes: Uint8Array): number {
@@ -186,17 +190,18 @@ function markdownToDocx(md: string): Blob {
     .split('\n')
     .map((line) => {
       if (!line) return '<w:p/>';
-      let style = '';
       let text = line;
+      let rPr = '';
       if (/^#\s+/.test(line)) {
-        style = 'Heading1';
         text = line.replace(/^#\s+/, '');
+        rPr = '<w:rPr><w:b/><w:sz w:val="32"/></w:rPr>';
       } else if (/^##\s+/.test(line)) {
-        style = 'Heading2';
         text = line.replace(/^##\s+/, '');
+        rPr = '<w:rPr><w:b/><w:sz w:val="26"/></w:rPr>';
+      } else if (/^\*\*|^- \*\*/.test(line)) {
+        rPr = '<w:rPr><w:b/></w:rPr>';
       }
-      const pPr = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : '';
-      return `<w:p>${pPr}<w:r><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+      return `<w:p><w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
     })
     .join('');
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -213,10 +218,14 @@ function markdownToDocx(md: string): Blob {
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
+  const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+</Relationships>`;
   return zipStore([
     { path: '[Content_Types].xml', content: contentTypes },
     { path: '_rels/.rels', content: rels },
     { path: 'word/document.xml', content: documentXml },
+    { path: 'word/_rels/document.xml.rels', content: docRels },
   ]);
 }
 

@@ -1211,6 +1211,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     name: applyOverlay(c).name,
                     type: c.type,
                   })),
+                  referenceImages: (() => {
+                    const refs = referenceImagesFor(entity.id);
+                    const caps = (entity as ResourceEntity & { imageCaptions?: { i1?: string; i2?: string } }).imageCaptions || {};
+                    const out: { slot: string; name?: string; caption?: string }[] = [];
+                    if (refs.slot1) out.push({ slot: 'Image 1', name: refs.slot1.name, caption: caps.i1 });
+                    if (refs.slot2) out.push({ slot: 'Image 2', name: refs.slot2.name, caption: caps.i2 });
+                    return out;
+                  })(),
                 })
               }
               className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"
@@ -1234,6 +1242,14 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     name: applyOverlay(c).name,
                     type: c.type,
                   })),
+                  referenceImages: (() => {
+                    const refs = referenceImagesFor(entity.id);
+                    const caps = (entity as ResourceEntity & { imageCaptions?: { i1?: string; i2?: string } }).imageCaptions || {};
+                    const out: { slot: string; name?: string; caption?: string }[] = [];
+                    if (refs.slot1) out.push({ slot: 'Image 1', name: refs.slot1.name, caption: caps.i1 });
+                    if (refs.slot2) out.push({ slot: 'Image 2', name: refs.slot2.name, caption: caps.i2 });
+                    return out;
+                  })(),
                 })
               }
               className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"
