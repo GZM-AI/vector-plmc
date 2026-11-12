@@ -1,7 +1,8 @@
 /**
- * Export one System Registry card — Markdown and Word.
+ * Export one System Registry card as Word.
  * Includes identity, description, notes, requirements, tags,
- * constituents, vertical integrators, vendors, attachments, and revision history.
+ * reference images, constituents, vertical integrators, vendors,
+ * attachments, and revision history.
  */
 import type { Document, ResourceEntity, RevisionRecord } from '../types/plm';
 
@@ -39,90 +40,93 @@ function downloadBlob(filename: string, blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
-function section(title: string, body?: string): string {
-  const text = (body || '').trim();
-  return [`## ${title}`, '', text || '_None_', ''].join('\n');
-}
-
-function list(items: string[]): string {
-  if (!items.length) return '_None_\n';
-  return items.map((i) => `- ${i}`).join('\n') + '\n';
-}
-
-export function cardToMarkdown(input: CardExportInput): string {
-  const e = input.entity;
-  const lines = [
-    `# ${e.name}`,
-    '',
-    `- **Type:** ${e.type}${e.kind ? ` · ${e.kind}` : ''}`,
-    `- **Status:** ${e.status}`,
-    `- **Revision:** ${e.revision || 'Unversioned'}`,
-    e.classification ? `- **Classification:** ${e.classification}` : '',
-    `- **ID:** ${e.id}`,
-    e.parentId ? `- **Parent:** ${e.parentId}` : '',
-    e.modifiedBy ? `- **Modified by:** ${e.modifiedBy}` : '',
-    e.lastModified ? `- **Last modified:** ${e.lastModified}` : '',
-    '',
-    section('Description', e.description),
-    section('Notes', e.notes),
-    section('Requirements', e.requirements),
-    `## Reference images`,
-    '',
-    list(
-      (input.referenceImages || []).map((img) => {
-        const name = img.name || img.slot;
-        return img.caption ? `${img.slot}: ${name} — ${img.caption}` : `${img.slot}: ${name}`;
-      })
-    ),
-    '',
-    `## Tags`,
-    '',
-    list(e.tags || []),
-    '',
-    `## Constituents`,
-    '',
-    list(input.children.map((c) => `${c.name} (${c.type})`)),
-    '',
-    `## Vertical Integrators`,
-    '',
-    list(input.integrators.map((c) => (c.description ? `${c.name} — ${c.description}` : c.name))),
-    '',
-    `## Vendors`,
-    '',
-    list(input.vendors.map((v) => (v.kind ? `${v.name} (${v.kind})` : v.name))),
-    '',
-    `## Attachments`,
-    '',
-    list(input.documents.map((d) => `${d.name}${d.kind ? ` · ${d.kind}` : ''}`)),
-    '',
-    `## Revision history`,
-    '',
-    input.history.length
-      ? input.history
-          .map(
-            (r) =>
-              `- **Rev ${r.revision}** · ${r.status} · ${r.changedAt}${r.changedBy ? ` · ${r.changedBy}` : ''}${
-                r.comment ? `\n  ${r.comment}` : ''
-              }`
-          )
-          .join('\n')
-      : '_No formal versions yet._',
-    '',
-  ];
-  return lines.filter((l) => l !== undefined).join('\n');
-}
-
-export function exportCardMarkdown(input: CardExportInput): void {
-  const name = `vector-card-${slug(input.entity.name)}.md`;
-  downloadBlob(name, new Blob([cardToMarkdown(input)], { type: 'text/markdown;charset=utf-8' }));
-}
-
 function xmlEscape(s: string): string {
   return s
     .replace(/&/g, '&')
     .replace(/</g, '<')
     .replace(/>/g, '>')
     .replace(/"/g, '"');
+}
+
+function p(text: string, opts?: { bold?: boolean; size?: number }): string {
+  const rPr =
+    opts?.bold || opts?.size
+      ? `<w:rPr>${opts.bold ? '<w:b/>' : ''}${opts.size ? `<w:sz w:val="${opts.size}"/>` : ''}</w:rPr>`
+      : '';
+  return `<w:p><w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+}
+
+function heading(text: string): string {
+  return p(text, { bold: true, size: 28 });
+}
+
+function bodyLines(text?: string): string {
+  const raw = (text || '').trim();
+  if (!raw) return p('None');
+  return raw
+    .split(/\r?\n/)
+    .map((line) => p(line || ' '))
+    .join('');
+}
+
+function bulletList(items: string[]): string {
+  if (!items.length) return p('None');
+  return items.map((item) => p(`• ${item}`)).join('');
+}
+
+function cardBody(input: CardExportInput): string {
+  const e = input.entity;
+  const identity = [
+    `Type: ${e.type}${e.kind ? ` · ${e.kind}` : ''}`,
+    `Status: ${e.status}`,
+    `Revision: ${e.revision || 'Unversioned'}`,
+    e.classification ? `Classification: ${e.classification}` : '',
+    `ID: ${e.id}`,
+    e.parentId ? `Parent: ${e.parentId}` : '',
+    e.modifiedBy ? `Modified by: ${e.modifiedBy}` : '',
+    e.lastModified ? `Last modified: ${e.lastModified}` : '',
+  ].filter(Boolean);
+
+  const images = (input.referenceImages || []).map((img) => {
+    const name = img.name || img.slot;
+    return img.caption ? `${img.slot}: ${name} — ${img.caption}` : `${img.slot}: ${name}`;
+  });
+
+  return [
+    p(e.name || 'Untitled', { bold: true, size: 36 }),
+    ...identity.map((line) => p(line)),
+    heading('Description'),
+    bodyLines(e.description),
+    heading('Notes'),
+    bodyLines(e.notes),
+    heading('Requirements'),
+    bodyLines(e.requirements),
+    heading('Reference images'),
+    bulletList(images),
+    heading('Tags'),
+    bulletList(e.tags || []),
+    heading('Constituents'),
+    bulletList(input.children.map((c) => `${c.name} (${c.type})`)),
+    heading('Vertical Integrators'),
+    bulletList(input.integrators.map((c) => (c.description ? `${c.name} — ${c.description}` : c.name))),
+    heading('Vendors'),
+    bulletList(input.vendors.map((v) => (v.kind ? `${v.name} (${v.kind})` : v.name))),
+    heading('Attachments'),
+    bulletList(input.documents.map((d) => `${d.name}${d.kind ? ` · ${d.kind}` : ''}`)),
+    heading('Revision history'),
+    input.history.length
+      ? input.history
+          .map(
+            (r) =>
+              p(
+                `Rev ${r.revision} · ${r.status} · ${r.changedAt}${r.changedBy ? ` · ${r.changedBy}` : ''}${
+                  r.comment ? ` — ${r.comment}` : ''
+                }`
+              )
+          )
+          .join('')
+      : p('No formal versions yet.'),
+  ].join('');
 }
 
 function crc32(bytes: Uint8Array): number {
@@ -153,9 +157,9 @@ function zipStore(files: { path: string; content: string }[]): Blob {
     const len = parts.reduce((n, p) => n + p.length, 0);
     const out = new Uint8Array(len);
     let o = 0;
-    for (const p of parts) {
-      out.set(p, o);
-      o += p.length;
+    for (const part of parts) {
+      out.set(part, o);
+      o += part.length;
     }
     return out;
   };
@@ -164,12 +168,39 @@ function zipStore(files: { path: string; content: string }[]): Blob {
     const data = enc.encode(f.content);
     const crc = crc32(data);
     const local = concat([
-      u32(0x04034b50), u16(20), u16(0), u16(0), u16(0), u16(0),
-      u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), name, data,
+      u32(0x04034b50),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(data.length),
+      u32(data.length),
+      u16(name.length),
+      u16(0),
+      name,
+      data,
     ]);
     const central = concat([
-      u32(0x02014b50), u16(20), u16(20), u16(0), u16(0), u16(0), u16(0),
-      u32(crc), u32(data.length), u32(data.length), u16(name.length), u16(0), u16(0), u16(0), u16(0), u32(0), u32(offset), name,
+      u32(0x02014b50),
+      u16(20),
+      u16(20),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(crc),
+      u32(data.length),
+      u32(data.length),
+      u16(name.length),
+      u16(0),
+      u16(0),
+      u16(0),
+      u16(0),
+      u32(0),
+      u32(offset),
+      name,
     ]);
     locals.push(local);
     centrals.push(central);
@@ -177,36 +208,24 @@ function zipStore(files: { path: string; content: string }[]): Blob {
   }
   const centralDir = concat(centrals);
   const end = concat([
-    u32(0x06054b50), u16(0), u16(0), u16(files.length), u16(files.length),
-    u32(centralDir.length), u32(offset), u16(0),
+    u32(0x06054b50),
+    u16(0),
+    u16(0),
+    u16(files.length),
+    u16(files.length),
+    u32(centralDir.length),
+    u32(offset),
+    u16(0),
   ]);
   return new Blob([concat([...locals, centralDir, end])], {
     type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   });
 }
 
-function markdownToDocx(md: string): Blob {
-  const body = md
-    .split('\n')
-    .map((line) => {
-      if (!line) return '<w:p/>';
-      let text = line;
-      let rPr = '';
-      if (/^#\s+/.test(line)) {
-        text = line.replace(/^#\s+/, '');
-        rPr = '<w:rPr><w:b/><w:sz w:val="32"/></w:rPr>';
-      } else if (/^##\s+/.test(line)) {
-        text = line.replace(/^##\s+/, '');
-        rPr = '<w:rPr><w:b/><w:sz w:val="26"/></w:rPr>';
-      } else if (/^\*\*|^- \*\*/.test(line)) {
-        rPr = '<w:rPr><w:b/></w:rPr>';
-      }
-      return `<w:p><w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
-    })
-    .join('');
+function buildDocx(input: CardExportInput): Blob {
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:body>${body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body>
+  <w:body>${cardBody(input)}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body>
 </w:document>`;
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -219,8 +238,7 @@ function markdownToDocx(md: string): Blob {
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
 </Relationships>`;
   const docRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-</Relationships>`;
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>`;
   return zipStore([
     { path: '[Content_Types].xml', content: contentTypes },
     { path: '_rels/.rels', content: rels },
@@ -231,5 +249,5 @@ function markdownToDocx(md: string): Blob {
 
 export function exportCardWord(input: CardExportInput): void {
   const name = `vector-card-${slug(input.entity.name)}.docx`;
-  downloadBlob(name, markdownToDocx(cardToMarkdown(input)));
+  downloadBlob(name, buildDocx(input));
 }
