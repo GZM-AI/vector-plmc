@@ -40,8 +40,14 @@ function downloadBlob(filename: string, blob: Blob): void {
   setTimeout(() => URL.revokeObjectURL(url), 1500);
 }
 
+function sanitize(s: string): string {
+  return (s || '')
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '')
+    .replace(/\u2028|\u2029/g, ' ');
+}
+
 function xmlEscape(s: string): string {
-  return s
+  return sanitize(s)
     .replace(/&/g, '&')
     .replace(/</g, '<')
     .replace(/>/g, '>')
