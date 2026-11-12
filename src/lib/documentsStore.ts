@@ -783,4 +783,4 @@ export async function deleteDocument(documentId: string): Promise<void> {
     // Do not throw — callers (especially reference-image replace) must still be able to attach the new file.
   }
 }
->>>>>>> 5522ed5 (Restore full documentsStore.ts)
+
