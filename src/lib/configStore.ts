@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-PLACEHOLDER_DO_NOT_USE
-=======
 /**
  * Phase 1 config store — cloud-first Registry spine
  * Load: Amplify → localStorage cache → seed
