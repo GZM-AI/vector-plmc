@@ -367,7 +367,7 @@ export function hydrateConfigStoreFromCloud(): Promise<void> {
 }
 
 /** Pack structuralType/kind into notes so they survive ProductOverlay (no dedicated fields). */
-const PLM_META_RE = /^\\[\\[plm-meta\\]\\](\\{[^]*?\\})\\n?/;
+const PLM_META_RE = /^\[\[plm-meta\]\](\{[^]*?\})\n?/;
 
 function packOverlayNotes(o: EntityOverlay): string | undefined {
   const user = o.notes || '';
