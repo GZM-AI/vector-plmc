@@ -110,75 +110,6 @@ import { VendorsSection } from './VendorsSection';
 
 
 
-type WithRequirements = ResourceEntity & { requirements?: string };
-
-function RequirementsSection({ entity }: { entity: ResourceEntity }) {
-  const current = (entity as WithRequirements).requirements || '';
-  const [draft, setDraft] = React.useState(current);
-  const [editing, setEditing] = React.useState(false);
-
-  React.useEffect(() => {
-    setDraft((entity as WithRequirements).requirements || '');
-    setEditing(false);
-  }, [entity.id, (entity as WithRequirements).requirements]);
-
-  const save = () => {
-    updateEntityFields(entity.id, { requirements: draft });
-    setEditing(false);
-  };
-
-  return (
-    <div>
-      <div className="flex items-center gap-2 mb-2">
-        <h4 className="text-sm font-medium text-blue-400">Requirements</h4>
-        {!editing && (
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="text-[11px] text-zinc-500 hover:text-zinc-300"
-          >
-            Edit
-          </button>
-        )}
-      </div>
-      {editing ? (
-        <div>
-          <MarkdownField
-            value={draft}
-            onChange={setDraft}
-            rows={14}
-            minHeight="min-h-[280px]"
-            placeholder="Requirements for this part. Use the toolbar for bold, underline, lists, and links."
-          />
-          <div className="flex gap-2 mt-2">
-            <button
-              type="button"
-              onClick={save}
-              className="text-xs px-3 py-1.5 bg-blue-600 rounded-xl text-white"
-            >
-              Save
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setEditing(false);
-                setDraft(current);
-              }}
-              className="text-xs px-3 py-1.5 text-zinc-400"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : current ? (
-        <MarkdownView source={current} />
-      ) : (
-        <p className="text-xs text-zinc-600">No requirements yet.</p>
-      )}
-    </div>
-  );
-}
-
 function ReferenceImagePane({
   entityId,
   slot,
@@ -901,6 +832,9 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
   const [draftNotes, setDraftNotes] = useState(
     (entity as ResourceEntity & { notes?: string }).notes || ''
   );
+  const [draftRequirements, setDraftRequirements] = useState(
+    (entity as ResourceEntity & { requirements?: string }).requirements || ''
+  );
   const [draftTags, setDraftTags] = useState<string[]>(entity.tags || []);
   const [tagDraft, setTagDraft] = useState('');
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
@@ -971,6 +905,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftRequirements((entity as ResourceEntity & { requirements?: string }).requirements || '');
     setDraftTags(entity.tags || []);
     setTagDraft('');
     setDraftType(entity.type);
@@ -1016,6 +951,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftRequirements((entity as ResourceEntity & { requirements?: string }).requirements || '');
     setDraftTags(entity.tags || []);
     setTagDraft('');
     setDraftType(entity.type);
@@ -1028,6 +964,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
     setDraftName(entity.name);
     setDraftDescription(entity.description || '');
     setDraftNotes((entity as ResourceEntity & { notes?: string }).notes || '');
+    setDraftRequirements((entity as ResourceEntity & { requirements?: string }).requirements || '');
     setDraftTags(entity.tags || []);
     setTagDraft('');
     setEditing(false);
@@ -1042,6 +979,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
       name: draftName.trim() || entity.name,
       description: draftDescription,
       notes: draftNotes,
+      requirements: draftRequirements,
       tags: normalizeTags([...draftTags, ...parseTagInput(tagDraft)]),
       ...(canEditType
         ? {
@@ -1581,7 +1519,22 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
         )}
       </div>
 
-      <RequirementsSection entity={entity} />
+      <div>
+        <h4 className="text-sm font-medium text-blue-400 mb-2">Requirements</h4>
+        {editing ? (
+          <MarkdownField
+            value={draftRequirements}
+            onChange={setDraftRequirements}
+            rows={14}
+            minHeight="min-h-[280px]"
+            placeholder="Requirements for this part. Use the toolbar for bold, underline, lists, and links."
+          />
+        ) : (entity as ResourceEntity & { requirements?: string }).requirements ? (
+          <MarkdownView source={(entity as ResourceEntity & { requirements?: string }).requirements || ''} />
+        ) : (
+          <p className="text-xs text-zinc-600">No requirements yet. Click Edit details to add them.</p>
+        )}
+      </div>
 
       <div>
         <h4 className="text-sm font-medium text-blue-400 mb-2">Tags</h4>
