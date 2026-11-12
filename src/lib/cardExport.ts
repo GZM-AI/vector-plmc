@@ -1,8 +1,7 @@
 /**
- * Export one System Registry card as a Word-compatible document (RTF).
- * Includes identity, description, notes, requirements, tags,
- * reference images, constituents, vertical integrators, vendors,
- * attachments, and revision history.
+ * Export one System Registry card as a Word-compatible RTF document.
+ * Preserves the same markup the card renders: bold, italic, underline,
+ * headings, bullet lists, and numbered lists.
  */
 import type { Document, ResourceEntity, RevisionRecord } from '../types/plm';
 
@@ -45,26 +44,123 @@ function rtfEscape(s: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/\{/g, '\\{')
     .replace(/\}/g, '\\}')
-    .replace(/\r\n|\r|\n/g, '\\par ')
-    .replace(/[^\x00-\x7F]/g, (ch) => {
-      const code = ch.charCodeAt(0);
-      return `\\u${code}?`;
-    });
+    .replace(/[^\x00-\x7F]/g, (ch) => `\\u${ch.charCodeAt(0)}?`);
+}
+
+/** Convert card inline markup to RTF. Supports **bold**, *italic*, ++underline++, `code`, and [text](url). */
+function inlineToRtf(src: string): string {
+  let s = src || '';
+  s = s.replace(/\*\*<u>\*\*([\s\S]+?)\*\*<\/u>\*\*/gi, '**++$1++**');
+  s = s.replace(/<u>\*\*([\s\S]+?)\*\*<\/u>/gi, '**++$1++**');
+  s = s.replace(/\*\*<u>([\s\S]+?)<\/u>\*\*/gi, '**++$1++**');
+  s = s.replace(/<u>([\s\S]+?)<\/u>/gi, '++$1++');
+  s = s.replace(/<\/?u>/gi, '');
+
+  const specs: { kind: string; re: RegExp }[] = [
+    { kind: 'u', re: /\+\+([\s\S]+?)\+\+/ },
+    { kind: 'b', re: /\*\*([\s\S]+?)\*\*/ },
+    { kind: 'b', re: /__([\s\S]+?)__/ },
+    { kind: 'i', re: /\*([^*\n]+)\*/ },
+    { kind: 'c', re: /`([^`]+)`/ },
+    { kind: 'a', re: /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/ },
+  ];
+
+  function walk(text: string): string {
+    let best: { index: number; len: number; kind: string; inner: string; href?: string } | null = null;
+    for (const spec of specs) {
+      const m = spec.re.exec(text);
+      if (!m) continue;
+      if (!best || m.index < best.index) {
+        best = { index: m.index, len: m[0].length, kind: spec.kind, inner: m[1], href: m[2] };
+      }
+    }
+    if (!best) return rtfEscape(text);
+    const before = text.slice(0, best.index);
+    const after = text.slice(best.index + best.len);
+    const inner = walk(best.inner);
+    let mid = inner;
+    if (best.kind === 'b') mid = `\\b ${inner}\\b0 `;
+    else if (best.kind === 'i') mid = `\\i ${inner}\\i0 `;
+    else if (best.kind === 'u') mid = `\\ul ${inner}\\ul0 `;
+    else if (best.kind === 'c') mid = `{\\f1 ${rtfEscape(best.inner)}}`;
+    else if (best.kind === 'a') mid = `{\\ul\\cf1 ${rtfEscape(best.inner)}}`;
+    return walk(before) + mid + walk(after);
+  }
+
+  return walk(s);
 }
 
 function heading(text: string): string {
-  return `\\par\\b\\fs28 ${rtfEscape(text)}\\b0\\fs22\\par `;
+  return `\\par\\pard\\sa120\\sb200\\b\\fs28 ${rtfEscape(text)}\\b0\\fs22\\par `;
 }
 
-function body(text?: string): string {
-  const raw = (text || '').trim();
-  if (!raw) return 'None\\par ';
-  return `${rtfEscape(raw)}\\par `;
+function paragraph(text: string): string {
+  const line = (text || '').trim();
+  if (!line) return '\\par ';
+  return `\\pard\\sa60 ${inlineToRtf(line)}\\par `;
 }
 
-function bullets(items: string[]): string {
-  if (!items.length) return 'None\\par ';
-  return items.map((item) => `\\bullet\\tab ${rtfEscape(item)}\\par `).join('');
+function markdownBlock(src?: string): string {
+  const raw = (src || '').replace(/\r\n/g, '\n').trim();
+  if (!raw) return '\\pard\\sa60 None\\par ';
+  const lines = raw.split('\n');
+  const out: string[] = [];
+  let bullets: string[] = [];
+  let numbers: string[] = [];
+
+  const flushBullets = () => {
+    if (!bullets.length) return;
+    bullets.forEach((item) => {
+      out.push(`\\pard\\li360\\fi-180\\sa40 \\bullet\\tab ${inlineToRtf(item)}\\par `);
+    });
+    bullets = [];
+  };
+  const flushNumbers = () => {
+    if (!numbers.length) return;
+    numbers.forEach((item, i) => {
+      out.push(`\\pard\\li360\\fi-180\\sa40 ${i + 1}.\\tab ${inlineToRtf(item)}\\par `);
+    });
+    numbers = [];
+  };
+
+  for (const line of lines) {
+    const h1 = /^#\s+(.*)/.exec(line);
+    const h2 = /^##\s+(.*)/.exec(line);
+    const h3 = /^###\s+(.*)/.exec(line);
+    const bullet = /^[-*]\s+(.*)/.exec(line);
+    const numbered = /^\d+\.\s+(.*)/.exec(line);
+    if (h1) {
+      flushBullets();
+      flushNumbers();
+      out.push(`\\par\\pard\\sa80\\sb160\\b\\fs32 ${inlineToRtf(h1[1])}\\b0\\fs22\\par `);
+    } else if (h2) {
+      flushBullets();
+      flushNumbers();
+      out.push(`\\par\\pard\\sa60\\sb120\\b\\fs28 ${inlineToRtf(h2[1])}\\b0\\fs22\\par `);
+    } else if (h3) {
+      flushBullets();
+      flushNumbers();
+      out.push(`\\par\\pard\\sa40\\sb80\\b\\fs24 ${inlineToRtf(h3[1])}\\b0\\fs22\\par `);
+    } else if (bullet) {
+      flushNumbers();
+      bullets.push(bullet[1]);
+    } else if (numbered) {
+      flushBullets();
+      numbers.push(numbered[1]);
+    } else {
+      flushBullets();
+      flushNumbers();
+      out.push(paragraph(line));
+    }
+  }
+  flushBullets();
+  flushNumbers();
+  return out.join('');
+}
+
+function plainList(items: string[]): string {
+  if (!items.length) return '\\pard\\sa60 None\\par ';
+  return items.map((item) => `\\pard\\li360\\fi-180\\sa40 \\bullet\\tab ${rtfEscape(item)}\\par `).join('');
 }
 
 function cardToRtf(input: CardExportInput): string {
@@ -96,36 +192,36 @@ function cardToRtf(input: CardExportInput): string {
 
   return [
     '{\\rtf1\\ansi\\deff0',
-    '{\\fonttbl{\\f0 Calibri;}}',
-    '\\f0\\fs22',
-    `\\b\\fs36 ${rtfEscape(e.name || 'Untitled')}\\b0\\fs22\\par `,
-    ...identity.map((line) => `${rtfEscape(line)}\\par `),
+    '{\\fonttbl{\\f0 Calibri;}{\\f1 Consolas;}}',
+    '{\\colortbl;\\red37\\green99\\blue235;}',
+    '\\f0\\fs22\\sa60',
+    `\\pard\\sa120\\b\\fs40 ${rtfEscape(e.name || 'Untitled')}\\b0\\fs22\\par `,
+    ...identity.map((line) => `\\pard\\sa20 ${rtfEscape(line)}\\par `),
     heading('Description'),
-    body(e.description),
+    markdownBlock(e.description),
     heading('Notes'),
-    body(e.notes),
+    markdownBlock(e.notes),
     heading('Requirements'),
-    body(e.requirements),
+    markdownBlock(e.requirements),
     heading('Reference images'),
-    bullets(images),
+    plainList(images),
     heading('Tags'),
-    bullets(e.tags || []),
+    plainList(e.tags || []),
     heading('Constituents'),
-    bullets(input.children.map((c) => `${c.name} (${c.type})`)),
+    plainList(input.children.map((c) => `${c.name} (${c.type})`)),
     heading('Vertical Integrators'),
-    bullets(input.integrators.map((c) => (c.description ? `${c.name} — ${c.description}` : c.name))),
+    plainList(input.integrators.map((c) => (c.description ? `${c.name} — ${c.description}` : c.name))),
     heading('Vendors'),
-    bullets(input.vendors.map((v) => (v.kind ? `${v.name} (${v.kind})` : v.name))),
+    plainList(input.vendors.map((v) => (v.kind ? `${v.name} (${v.kind})` : v.name))),
     heading('Attachments'),
-    bullets(input.documents.map((d) => `${d.name}${d.kind ? ` · ${d.kind}` : ''}`)),
+    plainList(input.documents.map((d) => `${d.name}${d.kind ? ` · ${d.kind}` : ''}`)),
     heading('Revision history'),
-    history.length ? bullets(history) : 'No formal versions yet.\\par ',
+    history.length ? plainList(history) : '\\pard\\sa60 No formal versions yet.\\par ',
     '}',
   ].join('');
 }
 
 export function exportCardWord(input: CardExportInput): void {
   const name = `vector-card-${slug(input.entity.name)}.doc`;
-  const rtf = cardToRtf(input);
-  downloadBlob(name, new Blob([rtf], { type: 'application/rtf' }));
+  downloadBlob(name, new Blob([cardToRtf(input)], { type: 'application/rtf' }));
 }
