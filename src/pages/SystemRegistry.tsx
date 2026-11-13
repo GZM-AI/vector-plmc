@@ -1240,8 +1240,8 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     type: c.type,
                   })),
                   referenceImages,
-                })
-              }
+                });
+              }}
               className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"
             >
               Export
