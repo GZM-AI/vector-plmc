@@ -1197,7 +1197,35 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
             </button>
 <button
               type="button"
-              onClick={() =>
+              onClick={async () => {
+                const refs = referenceImagesFor(entity.id);
+                const caps = (entity as ResourceEntity & { imageCaptions?: { i1?: string; i2?: string } }).imageCaptions || {};
+                const slots: { slot: string; doc?: typeof refs.slot1; caption?: string }[] = [
+                  { slot: 'Image 1', doc: refs.slot1, caption: caps.i1 },
+                  { slot: 'Image 2', doc: refs.slot2, caption: caps.i2 },
+                ];
+                const referenceImages: { slot: string; name?: string; caption?: string; dataUrl?: string }[] = [];
+                for (const s of slots) {
+                  if (!s.doc) continue;
+                  let dataUrl: string | undefined;
+                  try {
+                    const url = await getDocumentDownloadUrl(s.doc);
+                    if (url.startsWith('data:')) dataUrl = url;
+                    else {
+                      const res = await fetch(url);
+                      const blob = await res.blob();
+                      dataUrl = await new Promise<string>((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(String(reader.result || ''));
+                        reader.onerror = () => reject(reader.error);
+                        reader.readAsDataURL(blob);
+                      });
+                    }
+                  } catch (err) {
+                    console.warn('[export] image load failed', s.slot, err);
+                  }
+                  referenceImages.push({ slot: s.slot, name: s.doc.name, caption: s.caption, dataUrl });
+                }
                 exportCardWord({
                   entity: entity as ResourceEntity & { notes?: string; requirements?: string },
                   history,
@@ -1211,14 +1239,7 @@ const ComponentCard: React.FC<ComponentCardProps> = ({
                     name: applyOverlay(c).name,
                     type: c.type,
                   })),
-                  referenceImages: (() => {
-                    const refs = referenceImagesFor(entity.id);
-                    const caps = (entity as ResourceEntity & { imageCaptions?: { i1?: string; i2?: string } }).imageCaptions || {};
-                    const out: { slot: string; name?: string; caption?: string }[] = [];
-                    if (refs.slot1) out.push({ slot: 'Image 1', name: refs.slot1.name, caption: caps.i1 });
-                    if (refs.slot2) out.push({ slot: 'Image 2', name: refs.slot2.name, caption: caps.i2 });
-                    return out;
-                  })(),
+                  referenceImages,
                 })
               }
               className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-xl bg-zinc-800 border border-zinc-600 text-zinc-200 hover:border-zinc-400"

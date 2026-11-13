@@ -14,7 +14,7 @@ export type CardExportInput = {
   vendors: { name: string; kind?: string }[];
   integrators: { name: string; description?: string }[];
   children: { name: string; type: string }[];
-  referenceImages?: { slot: string; name?: string; caption?: string }[];
+  referenceImages?: { slot: string; name?: string; caption?: string; dataUrl?: string }[];
 };
 
 function slug(s: string): string {
@@ -158,6 +158,33 @@ function markdownBlock(src?: string): string {
   return out.join('');
 }
 
+
+function imageBlock(dataUrl?: string, caption?: string, fallback?: string): string {
+  if (!dataUrl || !dataUrl.startsWith('data:')) {
+    return `\\pard\\sa60 ${rtfEscape(fallback || 'Image unavailable')}\\par `;
+  }
+  const comma = dataUrl.indexOf(',');
+  const meta = comma >= 0 ? dataUrl.slice(0, comma) : '';
+  const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : '';
+  const isPng = /png/i.test(meta);
+  const isJpeg = /jpe?g/i.test(meta);
+  if (!b64 || (!isPng && !isJpeg)) {
+    return `\\pard\\sa60 ${rtfEscape(fallback || 'Image unavailable')}\\par `;
+  }
+  let binary = '';
+  try {
+    binary = atob(b64);
+  } catch {
+    return `\\pard\\sa60 ${rtfEscape(fallback || 'Image unavailable')}\\par `;
+  }
+  let hex = '';
+  for (let i = 0; i < binary.length; i++) hex += binary.charCodeAt(i).toString(16).padStart(2, '0');
+  const blip = isPng ? '\\pngblip' : '\\jpegblip';
+  const pict = `{\\pict${blip}\\picwgoal5400\\pichgoal3600 ${hex}}`;
+  const cap = caption ? `\\pard\\sa120\\qc\\i ${rtfEscape(caption)}\\i0\\par ` : '\\par ';
+  return `\\pard\\qc ${pict}\\par ${cap}`;
+}
+
 function plainList(items: string[]): string {
   if (!items.length) return '\\pard\\sa60 None\\par ';
   return items.map((item) => `\\pard\\li360\\fi-180\\sa40 \\bullet\\tab ${rtfEscape(item)}\\par `).join('');
@@ -176,10 +203,7 @@ function cardToRtf(input: CardExportInput): string {
     e.lastModified ? `Last modified: ${e.lastModified}` : '',
   ].filter(Boolean);
 
-  const images = (input.referenceImages || []).map((img) => {
-    const name = img.name || img.slot;
-    return img.caption ? `${img.slot}: ${name} — ${img.caption}` : `${img.slot}: ${name}`;
-  });
+  const images = input.referenceImages || [];
 
   const history = input.history.length
     ? input.history.map(
@@ -204,7 +228,9 @@ function cardToRtf(input: CardExportInput): string {
     heading('Requirements'),
     markdownBlock(e.requirements),
     heading('Reference images'),
-    plainList(images),
+    images.length
+      ? images.map((img) => imageBlock(img.dataUrl, img.caption, img.name || img.slot)).join('')
+      : '\\pard\\sa60 None\\par ',
     heading('Tags'),
     plainList(e.tags || []),
     heading('Constituents'),
